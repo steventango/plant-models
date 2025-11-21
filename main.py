@@ -5,9 +5,10 @@ import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
 import tensorflow as tf
-import tensorflow_datasets as tfds
 from flax import nnx
 from IPython.display import clear_output
+
+from dataset import load_and_preprocess_mnist
 
 tf.random.set_seed(0)
 
@@ -15,26 +16,7 @@ train_steps = 1200
 eval_every = 200
 batch_size = 32
 
-train_ds: tf.data.Dataset = tfds.load("mnist", split="train")
-test_ds: tf.data.Dataset = tfds.load("mnist", split="test")
-
-train_ds = train_ds.map(
-    lambda sample: {
-        "image": tf.cast(sample["image"], tf.float32) / 255,
-        "label": sample["label"],
-    }
-)
-test_ds = test_ds.map(
-    lambda sample: {
-        "image": tf.cast(sample["image"], tf.float32) / 255,
-        "label": sample["label"],
-    }
-)
-
-train_ds = train_ds.repeat().shuffle(1024)
-train_ds = train_ds.batch(batch_size, drop_remainder=True).take(train_steps).prefetch(1)
-test_ds = test_ds.batch(batch_size, drop_remainder=True).prefetch(1)
-
+train_ds, test_ds = load_and_preprocess_mnist(batch_size, train_steps)
 
 class CNN(nnx.Module):
     def __init__(self, *, rngs: nnx.Rngs):
