@@ -2,6 +2,7 @@ import matplotlib.pyplot as plt
 import optax
 import tensorflow as tf
 from flax import nnx
+from PIL import Image
 
 from dataset import convert_to_dataset, load_data, print_dataset_stats, split_data
 from network import MLP
@@ -72,6 +73,11 @@ def preprocess_batch(batch):
     return {k: v for k, v in batch.items() if k != "path"}
 
 
+def print_metrics(metrics):
+    for metric, value in metrics.compute().items():
+        print(f"{metric}: {value:.2f}")
+
+
 metrics_history = {
     "train_loss": [],
     "train_accuracy": [],
@@ -81,6 +87,7 @@ metrics_history = {
 
 rngs = nnx.Rngs(0)
 eval_every = 200
+
 for step, batch in enumerate(train_ds.as_numpy_iterator()):
     model.train()
     batch = preprocess_batch(batch)
@@ -98,6 +105,7 @@ for step, batch in enumerate(train_ds.as_numpy_iterator()):
 
         for metric, value in metrics.compute().items():
             metrics_history[f"test_{metric}"].append(value)
+        print_metrics(metrics)
         metrics.reset()
 
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
@@ -110,7 +118,7 @@ for step, batch in enumerate(train_ds.as_numpy_iterator()):
             )
         ax1.legend()
         ax2.legend()
-        plt.show()
+        plt.savefig("metrics.png")
 
 
 model.eval()
@@ -128,6 +136,10 @@ pred = pred_step(model, pred_batch)
 
 fig, axs = plt.subplots(5, 5, figsize=(12, 12))
 for i, ax in enumerate(axs.flatten()):
-    ax.imshow(test_batch["image"][i, ..., 0], cmap="gray")
+    path = test_batch["path"][i].decode("utf-8")
+    full_path = f"{data_dir}/{path}"
+    img = Image.open(full_path)
+    ax.imshow(img)
     ax.set_title(f"label={pred[i]}")
     ax.axis("off")
+plt.savefig("predictions.png")
