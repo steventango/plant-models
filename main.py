@@ -1,14 +1,10 @@
-from dataset import convert_to_dataset
-from dataset import split_data
-from dataset import print_dataset_stats
 import matplotlib.pyplot as plt
 import optax
 import tensorflow as tf
 from flax import nnx
-from IPython.display import clear_output
 
-from dataset import load_data
-from network import CNN
+from dataset import convert_to_dataset, load_data, print_dataset_stats, split_data
+from network import MLP
 
 tf.random.set_seed(0)
 
@@ -27,7 +23,7 @@ print_dataset_stats(train_ds, "train")
 print_dataset_stats(test_ds, "test")
 
 
-model = CNN(rngs=nnx.Rngs(0))
+model = MLP(rngs=nnx.Rngs(0))
 nnx.display(model)
 
 
@@ -43,8 +39,8 @@ metrics = nnx.MultiMetric(
 )
 
 
-def loss_fn(model: CNN, rngs: nnx.Rngs, batch):
-    logits = model(batch["image"], rngs)
+def loss_fn(model: MLP, rngs: nnx.Rngs, batch):
+    logits = model(batch["embedding"], rngs)
     loss = optax.softmax_cross_entropy_with_integer_labels(
         logits=logits, labels=batch["label"]
     ).mean()
@@ -53,7 +49,7 @@ def loss_fn(model: CNN, rngs: nnx.Rngs, batch):
 
 @nnx.jit
 def train_step(
-    model: CNN,
+    model: MLP,
     optimizer: nnx.Optimizer,
     metrics: nnx.MultiMetric,
     rngs: nnx.Rngs,
@@ -67,9 +63,13 @@ def train_step(
 
 
 @nnx.jit
-def eval_step(model: CNN, metrics: nnx.MultiMetric, rngs: nnx.Rngs, batch):
+def eval_step(model: MLP, metrics: nnx.MultiMetric, rngs: nnx.Rngs, batch):
     loss, logits = loss_fn(model, rngs, batch)
     metrics.update(loss=loss, logits=logits, labels=batch["label"])
+
+
+def preprocess_batch(batch):
+    return {k: v for k, v in batch.items() if k != "path"}
 
 
 metrics_history = {
@@ -80,9 +80,10 @@ metrics_history = {
 }
 
 rngs = nnx.Rngs(0)
-
+eval_every = 200
 for step, batch in enumerate(train_ds.as_numpy_iterator()):
     model.train()
+    batch = preprocess_batch(batch)
     train_step(model, optimizer, metrics, rngs, batch)
 
     if step > 0 and (step % eval_every == 0 or step == train_steps - 1):
@@ -92,13 +93,13 @@ for step, batch in enumerate(train_ds.as_numpy_iterator()):
 
         model.eval()
         for test_batch in test_ds.as_numpy_iterator():
+            test_batch = preprocess_batch(test_batch)
             eval_step(model, metrics, rngs, test_batch)
 
         for metric, value in metrics.compute().items():
             metrics_history[f"test_{metric}"].append(value)
         metrics.reset()
 
-        clear_output(wait=True)
         fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
         ax1.set_title("Loss")
         ax2.set_title("Accuracy")
@@ -116,13 +117,14 @@ model.eval()
 
 
 @nnx.jit
-def pred_step(model: CNN, batch):
-    logits = model(batch["image"])
+def pred_step(model: MLP, batch):
+    logits = model(batch["embedding"])
     return logits.argmax(axis=1)
 
 
 test_batch = test_ds.as_numpy_iterator().next()
-pred = pred_step(model, test_batch)
+pred_batch = preprocess_batch(test_batch)
+pred = pred_step(model, pred_batch)
 
 fig, axs = plt.subplots(5, 5, figsize=(12, 12))
 for i, ax in enumerate(axs.flatten()):
