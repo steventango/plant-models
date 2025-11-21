@@ -1,20 +1,31 @@
-import jax.numpy as jnp
+from dataset import convert_to_dataset
+from dataset import split_data
+from dataset import print_dataset_stats
 import matplotlib.pyplot as plt
 import optax
 import tensorflow as tf
 from flax import nnx
 from IPython.display import clear_output
 
-from dataset import load_and_preprocess_mnist
+from dataset import load_data
 from network import CNN
 
 tf.random.set_seed(0)
 
-train_steps = 1200
-eval_every = 200
-batch_size = 32
 
-train_ds, test_ds = load_and_preprocess_mnist(batch_size, train_steps)
+data_dir = "/data/plant-rl/offline"
+df = load_data(f"{data_dir}/labeled_dataset.parquet")
+
+train_groups = [(13, 1)]
+train_df, test_df = split_data(df, train_groups)
+
+train_steps = 1200
+batch_size = 32
+train_ds = convert_to_dataset(train_df, "train", batch_size, train_steps)
+test_ds = convert_to_dataset(test_df, "test", batch_size)
+print_dataset_stats(train_ds, "train")
+print_dataset_stats(test_ds, "test")
+
 
 model = CNN(rngs=nnx.Rngs(0))
 nnx.display(model)
