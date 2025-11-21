@@ -1,6 +1,3 @@
-from functools import partial
-from typing import Optional
-
 import jax.numpy as jnp
 import matplotlib.pyplot as plt
 import optax
@@ -9,6 +6,7 @@ from flax import nnx
 from IPython.display import clear_output
 
 from dataset import load_and_preprocess_mnist
+from network import CNN
 
 tf.random.set_seed(0)
 
@@ -18,46 +16,20 @@ batch_size = 32
 
 train_ds, test_ds = load_and_preprocess_mnist(batch_size, train_steps)
 
-class CNN(nnx.Module):
-    def __init__(self, *, rngs: nnx.Rngs):
-        self.conv1 = nnx.Conv(1, 32, kernel_size=(3, 3), rngs=rngs)
-        self.batch_norm1 = nnx.BatchNorm(32, rngs=rngs)
-        self.dropout1 = nnx.Dropout(rate=0.025)
-        self.conv2 = nnx.Conv(32, 64, kernel_size=(3, 3), rngs=rngs)
-        self.batch_norm2 = nnx.BatchNorm(64, rngs=rngs)
-        self.avg_pool = partial(nnx.avg_pool, window_shape=(2, 2), strides=(2, 2))
-        self.linear1 = nnx.Linear(3136, 256, rngs=rngs)
-        self.dropout2 = nnx.Dropout(rate=0.025)
-        self.linear2 = nnx.Linear(256, 10, rngs=rngs)
-
-    def __call__(self, x, rngs: Optional[nnx.Rngs] = None):
-        x = self.avg_pool(
-            nnx.relu(self.batch_norm1(self.dropout1(self.conv1(x), rngs=rngs)))
-        )
-        x = self.avg_pool(nnx.relu(self.batch_norm2(self.conv2(x))))
-        x = x.reshape(x.shape[0], -1)
-        x = nnx.relu(self.dropout2(self.linear1(x), rngs=rngs))
-        x = self.linear2(x)
-        return x
-
-
 model = CNN(rngs=nnx.Rngs(0))
 nnx.display(model)
 
-
-y = model(jnp.ones((1, 28, 28, 1)), nnx.Rngs(0))
-y
 
 learning_rate = 0.005
 momentum = 0.9
 
 optimizer = nnx.Optimizer(model, optax.adamw(learning_rate, momentum), wrt=nnx.Param)
+nnx.display(optimizer)
+
 metrics = nnx.MultiMetric(
     accuracy=nnx.metrics.Accuracy(),
     loss=nnx.metrics.Average("loss"),
 )
-
-nnx.display(optimizer)
 
 
 def loss_fn(model: CNN, rngs: nnx.Rngs, batch):
