@@ -12,12 +12,7 @@ def load_data(file: str):
     Returns:
         DataFrame
     """
-    df = pl.read_parquet(file)
-    df = df.with_columns(
-        [pl.when(pl.col("day") >= 16).then(1).otherwise(0).alias("bolted")]
-    )
-    df = df.with_columns(pl.col("bolted").fill_null(0))
-    return df
+    return pl.read_parquet(file)
 
 
 def split_data(df: pl.DataFrame, train_groups: list[tuple[int, int]]):
