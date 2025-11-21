@@ -16,10 +16,10 @@ df = load_data(f"{data_dir}/labeled_dataset.parquet")
 train_groups = [(13, 1)]
 train_df, test_df = split_data(df, train_groups)
 
-train_steps = 1200
+train_epochs = 100
 batch_size = 32
-train_ds = convert_to_dataset(train_df, "train", batch_size, train_steps)
-test_ds = convert_to_dataset(test_df, "test", batch_size)
+train_ds = convert_to_dataset(train_df, batch_size)
+test_ds = convert_to_dataset(test_df, batch_size)
 print_dataset_stats(train_ds, "train")
 print_dataset_stats(test_ds, "test")
 
@@ -73,8 +73,8 @@ def preprocess_batch(batch):
     return {k: v for k, v in batch.items() if k != "path"}
 
 
-def print_metrics(metrics):
-    for metric, value in metrics.compute().items():
+def print_metrics(metrics: dict[str, float]):
+    for metric, value in metrics.items():
         print(f"{metric}: {value:.2f}")
 
 
@@ -86,40 +86,40 @@ metrics_history = {
 }
 
 rngs = nnx.Rngs(0)
-eval_every = 200
+for epoch in range(train_epochs):
+    for step, batch in enumerate(train_ds.as_numpy_iterator()):
+        model.train()
+        batch = preprocess_batch(batch)
+        train_step(model, optimizer, metrics, rngs, batch)
 
-for step, batch in enumerate(train_ds.as_numpy_iterator()):
-    model.train()
-    batch = preprocess_batch(batch)
-    train_step(model, optimizer, metrics, rngs, batch)
+    for metric, value in metrics.compute().items():
+        metrics_history[f"train_{metric}"].append(value)
+    metrics.reset()
 
-    if step > 0 and (step % eval_every == 0 or step == train_steps - 1):
-        for metric, value in metrics.compute().items():
-            metrics_history[f"train_{metric}"].append(value)
-        metrics.reset()
+    model.eval()
+    for test_batch in test_ds.as_numpy_iterator():
+        test_batch = preprocess_batch(test_batch)
+        eval_step(model, metrics, rngs, test_batch)
 
-        model.eval()
-        for test_batch in test_ds.as_numpy_iterator():
-            test_batch = preprocess_batch(test_batch)
-            eval_step(model, metrics, rngs, test_batch)
+    for metric, value in metrics.compute().items():
+        metrics_history[f"test_{metric}"].append(value)
+    metrics.reset()
+    print_metrics({
+        k: v[-1] for k, v in metrics_history.items()
+    })
 
-        for metric, value in metrics.compute().items():
-            metrics_history[f"test_{metric}"].append(value)
-        print_metrics(metrics)
-        metrics.reset()
 
-        fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
-        ax1.set_title("Loss")
-        ax2.set_title("Accuracy")
-        for dataset in ("train", "test"):
-            ax1.plot(metrics_history[f"{dataset}_loss"], label=f"{dataset}_loss")
-            ax2.plot(
-                metrics_history[f"{dataset}_accuracy"], label=f"{dataset}_accuracy"
-            )
-        ax1.legend()
-        ax2.legend()
-        plt.savefig("metrics.png")
-
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+ax1.set_title("Loss")
+ax2.set_title("Accuracy")
+for dataset in ("train", "test"):
+    ax1.plot(metrics_history[f"{dataset}_loss"], label=f"{dataset}_loss")
+    ax2.plot(
+        metrics_history[f"{dataset}_accuracy"], label=f"{dataset}_accuracy"
+    )
+ax1.legend()
+ax2.legend()
+plt.savefig("metrics.png")
 
 model.eval()
 

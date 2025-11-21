@@ -38,9 +38,7 @@ def split_data(df: pl.DataFrame, train_groups: list[tuple[int, int]]):
 
 def convert_to_dataset(
     df: pl.DataFrame,
-    split: str,
     batch_size: int,
-    train_steps: int = 0,
     buffer_size: int = 1024,
 ):
     """
@@ -48,9 +46,7 @@ def convert_to_dataset(
 
     Args:
         df: DataFrame to convert
-        split: "train" or "test"
         batch_size: Batch size
-        train_steps: Number of training steps
         buffer_size: Buffer size for shuffling
 
     Returns:
@@ -68,9 +64,7 @@ def convert_to_dataset(
         }
     )
 
-    if split == "train":
-        ds = ds.repeat().shuffle(buffer_size).take(train_steps)
-    ds = ds.batch(batch_size, drop_remainder=True).prefetch(1)
+    ds = ds.shuffle(buffer_size).batch(batch_size, drop_remainder=True).prefetch(1)
     return ds
 
 
