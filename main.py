@@ -28,10 +28,8 @@ model = MLP(rngs=nnx.Rngs(0))
 nnx.display(model)
 
 
-learning_rate = 0.005
-momentum = 0.9
-
-optimizer = nnx.Optimizer(model, optax.adamw(learning_rate, momentum), wrt=nnx.Param)
+learning_rate = 1e-3
+optimizer = nnx.Optimizer(model, optax.adamw(learning_rate), wrt=nnx.Param)
 nnx.display(optimizer)
 
 metrics = nnx.MultiMetric(
