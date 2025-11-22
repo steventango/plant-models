@@ -1,12 +1,15 @@
 import matplotlib.pyplot as plt
+import metrax.nnx
 import optax
 import tensorflow as tf
 from flax import nnx
 from PIL import Image
 
+from metrax_monkey_patch import patch_metrax
 from dataset import convert_to_dataset, load_data, print_dataset_stats, split_data
 from network import MLP
 
+patch_metrax()
 tf.random.set_seed(0)
 
 
@@ -33,8 +36,9 @@ optimizer = nnx.Optimizer(model, optax.adamw(learning_rate), wrt=nnx.Param)
 nnx.display(optimizer)
 
 metrics = nnx.MultiMetric(
-    accuracy=nnx.metrics.Accuracy(),
-    loss=nnx.metrics.Average("loss"),
+    accuracy=metrax.nnx.Accuracy(),
+    loss=metrax.nnx.Average(),
+    f1=metrax.nnx.FBetaScore(),
 )
 
 
@@ -43,7 +47,8 @@ def loss_fn(model: MLP, rngs: nnx.Rngs, batch):
     loss = optax.softmax_cross_entropy_with_integer_labels(
         logits=logits, labels=batch["label"]
     ).mean()
-    return loss, logits
+    preds = logits.argmax(axis=1)
+    return loss, preds
 
 
 @nnx.jit
@@ -56,15 +61,15 @@ def train_step(
 ):
     """Train for a single step."""
     grad_fn = nnx.value_and_grad(loss_fn, has_aux=True)
-    (loss, logits), grads = grad_fn(model, rngs, batch)
-    metrics.update(loss=loss, logits=logits, labels=batch["label"])
+    (loss, preds), grads = grad_fn(model, rngs, batch)
+    metrics.update(values=loss, predictions=preds, labels=batch["label"])
     optimizer.update(model, grads)
 
 
 @nnx.jit
 def eval_step(model: MLP, metrics: nnx.MultiMetric, rngs: nnx.Rngs, batch):
-    loss, logits = loss_fn(model, rngs, batch)
-    metrics.update(loss=loss, logits=logits, labels=batch["label"])
+    loss, preds = loss_fn(model, rngs, batch)
+    metrics.update(values=loss, predictions=preds, labels=batch["label"])
 
 
 def preprocess_batch(batch):
@@ -79,8 +84,10 @@ def print_metrics(metrics: dict[str, float]):
 metrics_history = {
     "train_loss": [],
     "train_accuracy": [],
+    "train_f1": [],
     "test_loss": [],
     "test_accuracy": [],
+    "test_f1": [],
 }
 
 rngs = nnx.Rngs(0)
@@ -102,21 +109,21 @@ for epoch in range(train_epochs):
     for metric, value in metrics.compute().items():
         metrics_history[f"test_{metric}"].append(value)
     metrics.reset()
-    print_metrics({
-        k: v[-1] for k, v in metrics_history.items()
-    })
+    print_metrics({k: v[-1] for k, v in metrics_history.items()})
 
 
-fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(15, 5))
+fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
 ax1.set_title("Loss")
 ax2.set_title("Accuracy")
+ax3.set_title("F1")
+
 for dataset in ("train", "test"):
     ax1.plot(metrics_history[f"{dataset}_loss"], label=f"{dataset}_loss")
-    ax2.plot(
-        metrics_history[f"{dataset}_accuracy"], label=f"{dataset}_accuracy"
-    )
+    ax2.plot(metrics_history[f"{dataset}_accuracy"], label=f"{dataset}_accuracy")
+    ax3.plot(metrics_history[f"{dataset}_f1"], label=f"{dataset}_f1")
 ax1.legend()
 ax2.legend()
+ax3.legend()
 plt.savefig("metrics.png")
 
 model.eval()
