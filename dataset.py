@@ -1,6 +1,7 @@
 import numpy as np
 import polars as pl
 import tensorflow as tf
+from sklearn.model_selection import StratifiedGroupKFold
 
 
 def load_data(file: str):
@@ -15,25 +16,35 @@ def load_data(file: str):
     return pl.read_parquet(file)
 
 
-def split_data(df: pl.DataFrame, train_groups: list[tuple[int, int]]):
+def get_folds(df: pl.DataFrame, n_splits: int = 5, seed: int = 42):
     """
-    Split data into train and test sets based on experiment and zone.
+    Generate stratified group k-folds.
 
     Args:
         df: DataFrame to split
-        train_groups: List of (experiment, zone) tuples to use for training.
-                      All other groups will be used for testing.
+        n_splits: Number of folds
+        seed: Random seed
 
-    Returns:
-        Tuple of (train_df, test_df)
+    Yields:
+        Tuple of (fold_index, train_df, val_df)
     """
-    mask_expr = pl.lit(False)
-    for exp, zone in train_groups:
-        current = (pl.col("experiment") == exp) & (pl.col("zone") == zone)
-        mask_expr = mask_expr | current
-    train_df = df.filter(mask_expr)
-    test_df = df.filter(~mask_expr)
-    return train_df, test_df
+    # Create groups column for splitting
+    groups = (
+        df.select(pl.concat_str([pl.col("experiment"), pl.col("zone")], separator="_"))
+        .to_series()
+        .to_list()
+    )
+    y = df["bolted"].fill_null(0).to_list()
+
+    sgkf = StratifiedGroupKFold(n_splits=n_splits, shuffle=True, random_state=seed)
+
+    # We need a dummy X for the split method
+    X = np.zeros(len(y))
+
+    for i, (train_idx, val_idx) in enumerate(sgkf.split(X, y, groups)):
+        train_df = df[train_idx]
+        val_df = df[val_idx]
+        yield i, train_df, val_df
 
 
 def convert_to_dataset(

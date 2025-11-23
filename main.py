@@ -5,42 +5,14 @@ import tensorflow as tf
 from flax import nnx
 from PIL import Image
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
+import numpy as np
 
-from dataset import convert_to_dataset, load_data, print_dataset_stats, split_data
+from dataset import convert_to_dataset, load_data, print_dataset_stats, get_folds
 from metrax_monkey_patch import patch_metrax
 from network import MLP
 
 patch_metrax()
 tf.random.set_seed(0)
-
-
-data_dir = "/data/plant-rl/offline"
-df = load_data(f"{data_dir}/labeled_dataset.parquet")
-
-train_groups = [(13, 1)]
-train_df, test_df = split_data(df, train_groups)
-
-train_epochs = 100
-batch_size = 32
-train_ds = convert_to_dataset(train_df, batch_size)
-test_ds = convert_to_dataset(test_df, batch_size)
-print_dataset_stats(train_ds, "train")
-print_dataset_stats(test_ds, "test")
-
-
-model = MLP(rngs=nnx.Rngs(0))
-nnx.display(model)
-
-
-learning_rate = 1e-3
-optimizer = nnx.Optimizer(model, optax.adamw(learning_rate), wrt=nnx.Param)
-nnx.display(optimizer)
-
-metrics = nnx.MultiMetric(
-    accuracy=metrax.nnx.Accuracy(),
-    loss=metrax.nnx.Average(),
-    f1=metrax.nnx.FBetaScore(),
-)
 
 
 def loss_fn(model: MLP, rngs: nnx.Rngs, batch):
@@ -83,89 +55,201 @@ def print_metrics(metrics: dict[str, float]):
         print(f"{metric}: {value:.2f}")
 
 
-metrics_history = {
-    "train_loss": [],
-    "train_accuracy": [],
-    "train_f1": [],
-    "test_loss": [],
-    "test_accuracy": [],
-    "test_f1": [],
-}
+def train_and_evaluate(
+    train_ds: tf.data.Dataset,
+    test_ds: tf.data.Dataset | None = None,
+    epochs: int = 100,
+    learning_rate: float = 1e-3,
+    seed: int = 0,
+):
+    model = MLP(rngs=nnx.Rngs(seed))
+    optimizer = nnx.Optimizer(model, optax.adamw(learning_rate), wrt=nnx.Param)
+    metrics = nnx.MultiMetric(
+        accuracy=metrax.nnx.Accuracy(),
+        loss=metrax.nnx.Average(),
+        f1=metrax.nnx.FBetaScore(),
+    )
+    rngs = nnx.Rngs(seed)
 
-rngs = nnx.Rngs(0)
-for epoch in range(train_epochs):
-    for step, batch in enumerate(train_ds.as_numpy_iterator()):
-        model.train()
-        batch = preprocess_batch(batch)
-        train_step(model, optimizer, metrics, rngs, batch)
+    metrics_history = {
+        "train_loss": [],
+        "train_accuracy": [],
+        "train_f1": [],
+        "test_loss": [],
+        "test_accuracy": [],
+        "test_f1": [],
+    }
 
-    for metric, value in metrics.compute().items():
-        metrics_history[f"train_{metric}"].append(value)
-    metrics.reset()
+    last_test_preds = []
+    last_test_labels = []
+    last_test_paths = []
 
-    model.eval()
-    for test_batch in test_ds.as_numpy_iterator():
-        test_batch = preprocess_batch(test_batch)
-        eval_step(model, metrics, rngs, test_batch)
+    for epoch in range(epochs):
+        for step, batch in enumerate(train_ds.as_numpy_iterator()):
+            model.train()
+            batch = preprocess_batch(batch)
+            train_step(model, optimizer, metrics, rngs, batch)
 
-    for metric, value in metrics.compute().items():
-        metrics_history[f"test_{metric}"].append(value)
-    metrics.reset()
-    print_metrics({k: v[-1] for k, v in metrics_history.items()})
+        for metric, value in metrics.compute().items():
+            metrics_history[f"train_{metric}"].append(value)
+        metrics.reset()
+
+        if test_ds is not None:
+            model.eval()
+            for test_batch in test_ds.as_numpy_iterator():
+                test_batch_paths = test_batch["path"]
+                test_batch = preprocess_batch(test_batch)
+                preds = eval_step(model, metrics, rngs, test_batch)
+
+                if epoch == epochs - 1:
+                    last_test_preds.extend(preds)
+                    last_test_labels.extend(test_batch["label"])
+                    last_test_paths.extend(test_batch_paths)
+
+            for metric, value in metrics.compute().items():
+                metrics_history[f"test_{metric}"].append(value)
+            metrics.reset()
+
+        if (epoch + 1) % 10 == 0:
+            if test_ds is not None:
+                print(
+                    f"Epoch {epoch + 1}/{epochs} - Test F1: {metrics_history['test_f1'][-1]:.2f}"
+                )
+            else:
+                print(
+                    f"Epoch {epoch + 1}/{epochs} - Train F1: {metrics_history['train_f1'][-1]:.2f}"
+                )
+
+    return model, metrics_history, last_test_preds, last_test_labels, last_test_paths
 
 
-fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(15, 5))
-ax1.set_title("Loss")
-ax2.set_title("Accuracy")
-ax3.set_title("F1")
+data_dir = "/data/plant-rl/offline"
+df = load_data(f"{data_dir}/labeled_dataset.parquet")
 
-for dataset in ("train", "test"):
-    ax1.plot(metrics_history[f"{dataset}_loss"], label=f"{dataset}_loss")
-    ax2.plot(metrics_history[f"{dataset}_accuracy"], label=f"{dataset}_accuracy")
-    ax3.plot(metrics_history[f"{dataset}_f1"], label=f"{dataset}_f1")
-ax1.legend()
-ax2.legend()
-ax3.legend()
-plt.savefig("metrics.png")
+# Cross Validation
+n_splits = 5
+cv_results = []
+cv_confusion_data = []
+cv_all_preds = []
+cv_all_labels = []
+cv_all_paths = []
+num_epochs = 100
+batch_size = 32
 
-model.eval()
+print(f"Starting {n_splits}-Fold Cross Validation...")
+
+for i, train_df, val_df in get_folds(df, n_splits=n_splits):
+    print(f"\nFold {i + 1}/{n_splits}")
+    train_ds = convert_to_dataset(train_df, batch_size)
+    val_ds = convert_to_dataset(val_df, batch_size)
+
+    print_dataset_stats(train_ds, "train")
+    print_dataset_stats(val_ds, "val")
+
+    model, history, fold_preds, fold_labels, fold_paths = train_and_evaluate(
+        train_ds, val_ds, epochs=num_epochs
+    )
+    cv_results.append(history)
+
+    # Collect predictions for confusion matrix and visualization
+    cv_confusion_data.append((fold_labels, fold_preds))
+    cv_all_preds.extend(fold_preds)
+    cv_all_labels.extend(fold_labels)
+    cv_all_paths.extend(fold_paths)
+
+# Plot CV Confusion Matrices
+fig, axes = plt.subplots(1, n_splits, figsize=(20, 4))
+for i, (labels, preds) in enumerate(cv_confusion_data):
+    cm = confusion_matrix(labels, preds)
+    disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[0, 1])
+    disp.plot(ax=axes[i], colorbar=False)
+    axes[i].set_title(f"Fold {i + 1}")
+
+plt.tight_layout()
+plt.savefig("cv_confusion_matrices.png")
+print("CV confusion matrices saved to cv_confusion_matrices.png")
 
 
-@nnx.jit
-def pred_step(model: MLP, batch):
-    logits = model(batch["embedding"])
-    return logits.argmax(axis=1)
+def plot_metrics(histories: list[dict[str, list[float]]], filename: str):
+    """Plot metrics for multiple histories (e.g. CV folds) or a single history."""
+    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
+    metrics = ["loss", "accuracy", "f1"]
+    titles = ["Loss", "Accuracy", "F1"]
+
+    for ax, metric, title in zip(axes, metrics, titles):
+        # Despline
+        ax.spines["top"].set_visible(False)
+        ax.spines["right"].set_visible(False)
+
+        ax.set_title(title)
+        ax.set_xlabel("Epochs")
+        ax.set_ylabel(title)
+
+        for dataset, color in [("train", "tab:blue"), ("test", "tab:orange")]:
+            # Check if this dataset exists in the first history (assuming all are same)
+            if f"{dataset}_{metric}" not in histories[0]:
+                continue
+
+            # Collect all runs for this metric/dataset
+            all_runs = [h[f"{dataset}_{metric}"] for h in histories]
+
+            # Plot individual runs if there are multiple (CV case)
+            if len(histories) > 1:
+                for run in all_runs:
+                    ax.plot(run, color=color, alpha=0.2)
+
+            # Plot mean
+            mean_run = np.mean(all_runs, axis=0)
+            ax.plot(
+                mean_run,
+                color=color,
+                label=f"Mean {dataset}" if len(histories) > 1 else dataset,
+            )
+
+        ax.legend()
+
+    plt.tight_layout()
+    plt.savefig(filename)
+    print(f"Metrics saved to {filename}")
 
 
-test_batch = test_ds.as_numpy_iterator().next()
-pred_batch = preprocess_batch(test_batch)
-pred = pred_step(model, pred_batch)
+# Aggregate and Plot CV Results
+plot_metrics(cv_results, "cv_metrics.png")
+
+
+# Visualize CV Predictions
+cv_all_preds = np.array(cv_all_preds)
+cv_all_labels = np.array(cv_all_labels)
+cv_all_paths = np.array(cv_all_paths)
+
+indices = np.random.permutation(len(cv_all_preds))[:25]
+test_preds = cv_all_preds[indices]
+test_labels = cv_all_labels[indices]
+test_paths = cv_all_paths[indices]
 
 fig, axs = plt.subplots(5, 5, figsize=(12, 12))
-for i, ax in enumerate(axs.flatten()):
-    path = test_batch["path"][i].decode("utf-8")
+for i, (ax, pred, label, path) in enumerate(
+    zip(axs.flatten(), test_preds, test_labels, test_paths)
+):
+    path = path.decode("utf-8")
     full_path = f"{data_dir}/{path}"
     img = Image.open(full_path)
     ax.imshow(img)
-    ax.set_title(f"label={pred[i]}")
+    ax.set_title(f"label={label}, pred={pred}")
     ax.axis("off")
-plt.savefig("predictions.png")
+plt.savefig("cv_predictions.png")
+print("CV predictions saved to cv_predictions.png")
 
-metrics.reset()
-all_preds = []
-all_labels = []
 
-for batch in test_ds.as_numpy_iterator():
-    batch = preprocess_batch(batch)
-    preds = eval_step(model, metrics, rngs, batch)
-    all_preds.extend(preds)
-    all_labels.extend(batch["label"])
+# Final Model Training
+print("\nTraining Final Model on Full Dataset...")
+full_ds = convert_to_dataset(df, batch_size=batch_size)
+final_model, final_history, final_preds, final_labels, final_paths = train_and_evaluate(
+    full_ds, None, epochs=num_epochs
+)
 
-f1 = metrics.f1.clu_metric
-print(f"False Negatives: {int(f1.false_negatives)}")
-print(f"False Positives: {int(f1.false_positives)}")
+# Plot Final Model Metrics
+plot_metrics([final_history], "final_model_metrics.png")
 
-cm = confusion_matrix(all_labels, all_preds)
-disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[0, 1])
-disp.plot()
-plt.savefig("confusion_matrix.png")
+
+# TODO: Save final model
