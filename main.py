@@ -68,7 +68,6 @@ def train_and_evaluate(
     model = MLP(rngs=nnx.Rngs(seed))
     optimizer = nnx.Optimizer(model, optax.adamw(learning_rate), wrt=nnx.Param)
     metrics = nnx.MultiMetric(
-        accuracy=metrax.nnx.Accuracy(),
         loss=metrax.nnx.Average(),
         f1=metrax.nnx.FBetaScore(),
     )
@@ -76,10 +75,8 @@ def train_and_evaluate(
 
     metrics_history = {
         "train_loss": [],
-        "train_accuracy": [],
         "train_f1": [],
         "test_loss": [],
-        "test_accuracy": [],
         "test_f1": [],
     }
 
@@ -118,7 +115,6 @@ def train_and_evaluate(
         postfix = {}
         if test_ds is not None:
             postfix["test_f1"] = f"{metrics_history['test_f1'][-1]:.2f}"
-            postfix["test_acc"] = f"{metrics_history['test_accuracy'][-1]:.2f}"
         else:
             postfix["train_f1"] = f"{metrics_history['train_f1'][-1]:.2f}"
             postfix["train_loss"] = f"{metrics_history['train_loss'][-1]:.2f}"
@@ -178,7 +174,7 @@ print("CV confusion matrices saved to cv_confusion_matrices.png")
 
 # Print CV Summary Statistics
 print("\n=== Cross Validation Summary ===")
-metrics_to_report = ["test_accuracy", "test_f1", "test_loss"]
+metrics_to_report = ["test_f1", "test_loss"]
 for metric in metrics_to_report:
     # Get the final value for each fold
     values = [h[metric][-1] for h in cv_results]
@@ -199,9 +195,9 @@ print("Aggregated confusion matrix saved to cv_confusion_matrix_aggregated.png")
 
 def plot_metrics(histories: list[dict[str, list[float]]], filename: str):
     """Plot metrics for multiple histories (e.g. CV folds) or a single history."""
-    fig, axes = plt.subplots(1, 3, figsize=(15, 5))
-    metrics = ["loss", "accuracy", "f1"]
-    titles = ["Loss", "Accuracy", "F1"]
+    fig, axes = plt.subplots(1, 2, figsize=(10, 5))
+    metrics = ["loss", "f1"]
+    titles = ["Loss", "F1"]
 
     for ax, metric, title in zip(axes, metrics, titles):
         # Despline
