@@ -1,7 +1,6 @@
 import inspect
 
 import metrax
-import metrax.classification_metrics
 
 
 def merge(self, other):
