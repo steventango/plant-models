@@ -171,6 +171,26 @@ plt.tight_layout()
 plt.savefig("cv_confusion_matrices.png")
 print("CV confusion matrices saved to cv_confusion_matrices.png")
 
+# Print CV Summary Statistics
+print("\n=== Cross Validation Summary ===")
+metrics_to_report = ["test_accuracy", "test_f1", "test_loss"]
+for metric in metrics_to_report:
+    # Get the final value for each fold
+    values = [h[metric][-1] for h in cv_results]
+    mean_val = np.mean(values)
+    std_val = np.std(values)
+    print(f"Mean {metric}: {mean_val:.4f} ± {std_val:.4f}")
+
+# Plot Aggregated Confusion Matrix
+cm_agg = confusion_matrix(cv_all_labels, cv_all_preds)
+disp_agg = ConfusionMatrixDisplay(confusion_matrix=cm_agg, display_labels=[0, 1])
+fig_agg, ax_agg = plt.subplots(figsize=(6, 6))
+disp_agg.plot(ax=ax_agg, colorbar=False)
+ax_agg.set_title("Aggregated Confusion Matrix (All Folds)")
+plt.tight_layout()
+plt.savefig("cv_confusion_matrix_aggregated.png")
+print("Aggregated confusion matrix saved to cv_confusion_matrix_aggregated.png")
+
 
 def plot_metrics(histories: list[dict[str, list[float]]], filename: str):
     """Plot metrics for multiple histories (e.g. CV folds) or a single history."""
