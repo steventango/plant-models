@@ -7,6 +7,8 @@ from PIL import Image
 from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 import numpy as np
 
+from tqdm import tqdm
+
 from dataset import convert_to_dataset, load_data, print_dataset_stats, get_folds
 from metrax_monkey_patch import patch_metrax
 from network import MLP
@@ -61,6 +63,7 @@ def train_and_evaluate(
     epochs: int = 100,
     learning_rate: float = 1e-3,
     seed: int = 0,
+    description: str = "Training",
 ):
     model = MLP(rngs=nnx.Rngs(seed))
     optimizer = nnx.Optimizer(model, optax.adamw(learning_rate), wrt=nnx.Param)
@@ -84,7 +87,8 @@ def train_and_evaluate(
     last_test_labels = []
     last_test_paths = []
 
-    for epoch in range(epochs):
+    pbar = tqdm(range(epochs), desc=description, unit="epoch")
+    for epoch in pbar:
         for step, batch in enumerate(train_ds.as_numpy_iterator()):
             model.train()
             batch = preprocess_batch(batch)
@@ -110,15 +114,16 @@ def train_and_evaluate(
                 metrics_history[f"test_{metric}"].append(value)
             metrics.reset()
 
-        if (epoch + 1) % 10 == 0:
-            if test_ds is not None:
-                print(
-                    f"Epoch {epoch + 1}/{epochs} - Test F1: {metrics_history['test_f1'][-1]:.2f}"
-                )
-            else:
-                print(
-                    f"Epoch {epoch + 1}/{epochs} - Train F1: {metrics_history['train_f1'][-1]:.2f}"
-                )
+        # Update progress bar
+        postfix = {}
+        if test_ds is not None:
+            postfix["test_f1"] = f"{metrics_history['test_f1'][-1]:.2f}"
+            postfix["test_acc"] = f"{metrics_history['test_accuracy'][-1]:.2f}"
+        else:
+            postfix["train_f1"] = f"{metrics_history['train_f1'][-1]:.2f}"
+            postfix["train_loss"] = f"{metrics_history['train_loss'][-1]:.2f}"
+
+        pbar.set_postfix(postfix)
 
     return model, metrics_history, last_test_preds, last_test_labels, last_test_paths
 
@@ -149,7 +154,7 @@ for i, train_df, val_df in get_folds(df, n_splits=n_splits):
     print_dataset_stats(val_ds, "val")
 
     model, history, fold_preds, fold_labels, fold_paths = train_and_evaluate(
-        train_ds, val_ds, epochs=num_epochs
+        train_ds, val_ds, epochs=num_epochs, description=f"Fold {i + 1}"
     )
     cv_results.append(history)
 
@@ -267,7 +272,7 @@ print("CV predictions saved to cv_predictions.png")
 print("\nTraining Final Model on Full Dataset...")
 full_ds = convert_to_dataset(df, batch_size=32, shuffle=True, drop_remainder=True)
 final_model, final_history, final_preds, final_labels, final_paths = train_and_evaluate(
-    full_ds, None, epochs=num_epochs
+    full_ds, None, epochs=num_epochs, description="Final Model"
 )
 
 # Plot Final Model Metrics
