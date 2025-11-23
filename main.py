@@ -4,9 +4,10 @@ import optax
 import tensorflow as tf
 from flax import nnx
 from PIL import Image
+from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 
-from metrax_monkey_patch import patch_metrax
 from dataset import convert_to_dataset, load_data, print_dataset_stats, split_data
+from metrax_monkey_patch import patch_metrax
 from network import MLP
 
 patch_metrax()
@@ -70,6 +71,7 @@ def train_step(
 def eval_step(model: MLP, metrics: nnx.MultiMetric, rngs: nnx.Rngs, batch):
     loss, preds = loss_fn(model, rngs, batch)
     metrics.update(values=loss, predictions=preds, labels=batch["label"])
+    return preds
 
 
 def preprocess_batch(batch):
@@ -148,3 +150,22 @@ for i, ax in enumerate(axs.flatten()):
     ax.set_title(f"label={pred[i]}")
     ax.axis("off")
 plt.savefig("predictions.png")
+
+metrics.reset()
+all_preds = []
+all_labels = []
+
+for batch in test_ds.as_numpy_iterator():
+    batch = preprocess_batch(batch)
+    preds = eval_step(model, metrics, rngs, batch)
+    all_preds.extend(preds)
+    all_labels.extend(batch["label"])
+
+f1 = metrics.f1.clu_metric
+print(f"False Negatives: {int(f1.false_negatives)}")
+print(f"False Positives: {int(f1.false_positives)}")
+
+cm = confusion_matrix(all_labels, all_preds)
+disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[0, 1])
+disp.plot()
+plt.savefig("confusion_matrix.png")
