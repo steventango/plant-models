@@ -140,8 +140,10 @@ print(f"Starting {n_splits}-Fold Cross Validation...")
 
 for i, train_df, val_df in get_folds(df, n_splits=n_splits):
     print(f"\nFold {i + 1}/{n_splits}")
-    train_ds = convert_to_dataset(train_df, batch_size)
-    val_ds = convert_to_dataset(val_df, batch_size)
+    train_ds = convert_to_dataset(
+        train_df, batch_size, shuffle=True, drop_remainder=True
+    )
+    val_ds = convert_to_dataset(val_df, batch_size, shuffle=False, drop_remainder=False)
 
     print_dataset_stats(train_ds, "train")
     print_dataset_stats(val_ds, "val")
@@ -243,7 +245,7 @@ print("CV predictions saved to cv_predictions.png")
 
 # Final Model Training
 print("\nTraining Final Model on Full Dataset...")
-full_ds = convert_to_dataset(df, batch_size=batch_size)
+full_ds = convert_to_dataset(df, batch_size=32, shuffle=True, drop_remainder=True)
 final_model, final_history, final_preds, final_labels, final_paths = train_and_evaluate(
     full_ds, None, epochs=num_epochs
 )

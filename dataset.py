@@ -51,6 +51,8 @@ def convert_to_dataset(
     df: pl.DataFrame,
     batch_size: int,
     buffer_size: int = 1024,
+    shuffle: bool = True,
+    drop_remainder: bool = True,
 ):
     """
     Convert polars DataFrame to TensorFlow dataset.
@@ -59,6 +61,8 @@ def convert_to_dataset(
         df: DataFrame to convert
         batch_size: Batch size
         buffer_size: Buffer size for shuffling
+        shuffle: Whether to shuffle the dataset
+        drop_remainder: Whether to drop the last batch if it's smaller than batch_size
 
     Returns:
         TensorFlow dataset
@@ -75,7 +79,10 @@ def convert_to_dataset(
         }
     )
 
-    ds = ds.shuffle(buffer_size).batch(batch_size, drop_remainder=True).prefetch(1)
+    if shuffle:
+        ds = ds.shuffle(buffer_size)
+
+    ds = ds.batch(batch_size, drop_remainder=drop_remainder).prefetch(1)
     return ds
 
 
