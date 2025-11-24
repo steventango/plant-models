@@ -4,6 +4,8 @@ from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 from PIL.Image import Image
+from sklearn.metrics._classification import confusion_matrix
+from sklearn.metrics._plot.confusion_matrix import ConfusionMatrixDisplay
 
 
 def plot_metrics(
@@ -84,3 +86,19 @@ def plot_predictions(
     plt.savefig(output_dir / filename)
     logging.info(f"Predictions saved to {output_dir / filename}")
     plt.close(fig)
+
+
+def plot_confusion_matrix(
+    labels: list[int],
+    preds: list[int],
+    output_dir: Path,
+    filename: str = "cv_confusion_matrix_aggregated.png",
+):
+    cm_agg = confusion_matrix(labels, preds)
+    disp_agg = ConfusionMatrixDisplay(confusion_matrix=cm_agg, display_labels=[0, 1])
+    fig_agg, ax_agg = plt.subplots(figsize=(6, 6))
+    disp_agg.plot(ax=ax_agg, colorbar=False)
+    ax_agg.set_title("Aggregated Confusion Matrix (All Folds)")
+    plt.tight_layout()
+    plt.savefig(output_dir / filename)
+    logging.info(f"Aggregated confusion matrix saved to {output_dir / filename}")

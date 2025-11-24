@@ -3,20 +3,18 @@ import logging
 import shutil
 from pathlib import Path
 
-import matplotlib.pyplot as plt
 import metrax.nnx
 import numpy as np
 import optax
 import orbax.checkpoint
 import tensorflow as tf
 from flax import nnx
-from sklearn.metrics import ConfusionMatrixDisplay, confusion_matrix
 from tqdm import tqdm
 
 from dataset import convert_to_dataset, get_folds, load_data, print_dataset_stats
 from metrax_monkey_patch import patch_metrax
 from network import MLP
-from plot import plot_metrics, plot_predictions
+from plot import plot_confusion_matrix, plot_metrics, plot_predictions
 
 patch_metrax()
 tf.random.set_seed(0)
@@ -214,21 +212,6 @@ def main():
         cv_all_labels.extend(fold_labels)
         cv_all_paths.extend(fold_paths)
 
-    # Plot CV Confusion Matrices
-    fig, axes = plt.subplots(1, n_splits, figsize=(20, 4))
-    for i, (labels, preds) in enumerate(cv_confusion_data):
-        cm = confusion_matrix(labels, preds)
-        disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels=[0, 1])
-        disp.plot(ax=axes[i], colorbar=False)
-        axes[i].set_title(f"Fold {i + 1}")
-
-    plt.tight_layout()
-    plt.savefig(output_dir / "cv_confusion_matrices.png")
-    logging.info(
-        f"CV confusion matrices saved to {output_dir / 'cv_confusion_matrices.png'}"
-    )
-
-    # Print CV Summary Statistics
     logging.info("\n=== Cross Validation Summary ===")
     metrics_to_report = ["test_f1", "test_loss"]
     for metric in metrics_to_report:
@@ -238,18 +221,7 @@ def main():
         std_val = np.std(values)
         logging.info(f"Mean {metric}: {mean_val:.4f} ± {std_val:.4f}")
 
-    # Plot Aggregated Confusion Matrix
-    cm_agg = confusion_matrix(cv_all_labels, cv_all_preds)
-    disp_agg = ConfusionMatrixDisplay(confusion_matrix=cm_agg, display_labels=[0, 1])
-    fig_agg, ax_agg = plt.subplots(figsize=(6, 6))
-    disp_agg.plot(ax=ax_agg, colorbar=False)
-    ax_agg.set_title("Aggregated Confusion Matrix (All Folds)")
-    plt.tight_layout()
-    plt.savefig(output_dir / "cv_confusion_matrix_aggregated.png")
-    logging.info(
-        f"Aggregated confusion matrix saved to {output_dir / 'cv_confusion_matrix_aggregated.png'}"
-    )
-
+    plot_confusion_matrix(cv_all_labels, cv_all_preds, output_dir)
     plot_metrics(cv_results, "cv_metrics.png", output_dir)
     plot_predictions(cv_all_preds, cv_all_labels, cv_all_paths, data_dir, output_dir)
 
