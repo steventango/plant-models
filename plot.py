@@ -54,7 +54,7 @@ def plot_metrics(
 
 
 def plot_predictions(
-    preds, labels, paths, data_dir, output_dir, filename="cv_predictions.png", n=25
+    preds, labels, paths, data_dir, output_dir, filename="cv_predictions.png", n=64
 ):
     """Visualizes a random sample of predictions."""
     preds = np.array(preds)
