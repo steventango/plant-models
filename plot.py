@@ -3,7 +3,7 @@ from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
-from PIL.Image import Image
+from PIL import Image
 from sklearn.metrics._classification import confusion_matrix
 from sklearn.metrics._plot.confusion_matrix import ConfusionMatrixDisplay
 
@@ -49,8 +49,9 @@ def plot_metrics(
         ax.legend()
 
     plt.tight_layout()
-    plt.savefig(output_dir / filename)
-    logging.info(f"Metrics saved to {output_dir / filename}")
+    output_path = output_dir / filename
+    plt.savefig(output_path)
+    logging.info(f"Metrics saved to {output_path}")
 
 
 def plot_predictions(
@@ -83,8 +84,9 @@ def plot_predictions(
             ax.axis("off")
 
     plt.tight_layout()
-    plt.savefig(output_dir / filename)
-    logging.info(f"Predictions saved to {output_dir / filename}")
+    output_path = output_dir / filename
+    plt.savefig(output_path)
+    logging.info(f"Predictions saved to {output_path}")
     plt.close(fig)
 
 
@@ -100,5 +102,6 @@ def plot_confusion_matrix(
     disp_agg.plot(ax=ax_agg, colorbar=False)
     ax_agg.set_title("Aggregated Confusion Matrix (All Folds)")
     plt.tight_layout()
-    plt.savefig(output_dir / filename)
-    logging.info(f"Aggregated confusion matrix saved to {output_dir / filename}")
+    output_path = output_dir / filename
+    plt.savefig(output_path)
+    logging.info(f"Aggregated confusion matrix saved to {output_path}")
