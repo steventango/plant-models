@@ -129,6 +129,7 @@ def train_and_evaluate(
 
     return model, metrics_history, last_test_preds, last_test_labels, last_test_paths
 
+
 def configure_logging(output_dir: Path):
     """Configures logging to file and console."""
     root_logger = logging.getLogger()
@@ -146,11 +147,11 @@ def configure_logging(output_dir: Path):
     stream_handler = logging.StreamHandler()
     stream_handler.setFormatter(formatter)
     root_logger.addHandler(stream_handler)
-    return root_logger
-    
 
 
-def plot_metrics(histories: list[dict[str, list[float]]], filename: str, output_dir: Path):
+def plot_metrics(
+    histories: list[dict[str, list[float]]], filename: str, output_dir: Path
+):
     """Plot metrics for multiple histories (e.g. CV folds) or a single history."""
     fig, axes = plt.subplots(1, 2, figsize=(10, 5))
     metrics = ["loss", "f1"]
@@ -193,35 +194,81 @@ def plot_metrics(histories: list[dict[str, list[float]]], filename: str, output_
     logging.info(f"Metrics saved to {output_dir / filename}")
 
 
-if __name__ == "__main__":
+def save_model(final_model, output_dir):
+    ckpt = {"model": nnx.state(final_model)}
+    orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
+    orbax_checkpointer.save((output_dir / "model").resolve(), ckpt, force=True)
+    logging.info(f"Final model saved to {output_dir / 'model'}")
+
+
+def visualize_predictions(
+    preds, labels, paths, data_dir, output_dir, filename="cv_predictions.png", n=25
+):
+    """Visualizes a random sample of predictions."""
+    preds = np.array(preds)
+    labels = np.array(labels)
+    paths = np.array(paths)
+
+    if len(preds) > n:
+        indices = np.random.permutation(len(preds))[:n]
+        preds = preds[indices]
+        labels = labels[indices]
+        paths = paths[indices]
+
+    grid_size = int(np.ceil(np.sqrt(len(preds))))
+    fig, axs = plt.subplots(grid_size, grid_size, figsize=(12, 12))
+
+    for i, ax in enumerate(axs.flatten()):
+        if i < len(preds):
+            pred, label, path = preds[i], labels[i], paths[i]
+            path = path.decode("utf-8")
+            full_path = f"{data_dir}/{path}"
+            img = Image.open(full_path)
+            ax.imshow(img)
+            ax.set_title(f"label={label}, pred={pred}")
+            ax.axis("off")
+        else:
+            ax.axis("off")
+
+    plt.tight_layout()
+    plt.savefig(output_dir / filename)
+    logging.info(f"Predictions saved to {output_dir / filename}")
+    plt.close(fig)
+
+
+def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--output_dir", type=str, default="results/mlp")
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--n_splits", type=int, default=5)
-    parser.add_argument("--force", action="store_true", help="Force overwrite existing output directory")
+    parser.add_argument(
+        "--force", action="store_true", help="Force overwrite existing output directory"
+    )
     args = parser.parse_args()
 
     output_dir = Path(args.output_dir)
     if output_dir.exists():
         if not args.force:
-            raise ValueError(f"Output directory {output_dir} already exists. Use --force to overwrite.")
+            raise ValueError(
+                f"Output directory {output_dir} already exists. Use --force to overwrite."
+            )
         shutil.rmtree(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    root_logger = configure_logging(output_dir)
+    configure_logging(output_dir)
 
     data_dir = Path("/data/plant-rl/offline")
     df = load_data(str(data_dir / "labeled_dataset.parquet"))
 
     # Cross Validation
     n_splits = args.n_splits
+    num_epochs = args.epochs
+    batch_size = 32
     cv_results = []
     cv_confusion_data = []
     cv_all_preds = []
     cv_all_labels = []
     cv_all_paths = []
-    num_epochs = args.epochs
-    batch_size = 32
 
     logging.info(f"Starting {n_splits}-Fold Cross Validation...")
 
@@ -284,47 +331,19 @@ if __name__ == "__main__":
         f"Aggregated confusion matrix saved to {output_dir / 'cv_confusion_matrix_aggregated.png'}"
     )
 
-
-    # Aggregate and Plot CV Results
     plot_metrics(cv_results, "cv_metrics.png", output_dir)
+    visualize_predictions(
+        cv_all_preds, cv_all_labels, cv_all_paths, data_dir, output_dir
+    )
 
-    # Visualize CV Predictions
-    cv_all_preds = np.array(cv_all_preds)
-    cv_all_labels = np.array(cv_all_labels)
-    cv_all_paths = np.array(cv_all_paths)
-
-    indices = np.random.permutation(len(cv_all_preds))[:25]
-    test_preds = cv_all_preds[indices]
-    test_labels = cv_all_labels[indices]
-    test_paths = cv_all_paths[indices]
-
-    fig, axs = plt.subplots(5, 5, figsize=(12, 12))
-    for i, (ax, pred, label, path) in enumerate(
-        zip(axs.flatten(), test_preds, test_labels, test_paths)
-    ):
-        path = path.decode("utf-8")
-        full_path = f"{data_dir}/{path}"
-        img = Image.open(full_path)
-        ax.imshow(img)
-        ax.set_title(f"label={label}, pred={pred}")
-        ax.axis("off")
-    plt.savefig(output_dir / "cv_predictions.png")
-    logging.info(f"CV predictions saved to {output_dir / 'cv_predictions.png'}")
-
-    # Final Model Training
     logging.info("\nTraining Final Model on Full Dataset...")
     full_ds = convert_to_dataset(df, batch_size=32, shuffle=True, drop_remainder=True)
     final_model, final_history, final_preds, final_labels, final_paths = (
         train_and_evaluate(full_ds, None, epochs=num_epochs, description="Final Model")
     )
+    plot_metrics([final_history], "final_metrics.png", output_dir)
+    save_model(final_model, output_dir)
 
-    # Plot Final Model Metrics
-    plot_metrics([final_history], "final_model_metrics.png")
 
-    # Save final model
-    ckpt = {"model": nnx.state(final_model)}
-    orbax_checkpointer = orbax.checkpoint.PyTreeCheckpointer()
-    save_args = orbax_checkpointer.save(
-        (output_dir / "model").resolve(), ckpt, force=True
-    )
-    logging.info(f"Final model saved to {output_dir / 'model'}")
+if __name__ == "__main__":
+    main()
