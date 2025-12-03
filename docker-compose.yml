@@ -1,0 +1,28 @@
+services:
+  bolted:
+    build:
+      context: api/bolted
+      dockerfile: Dockerfile
+    env_file: .env
+    networks:
+      - plant-network
+    privileged: true
+    restart: unless-stopped
+    volumes:
+      - ./api/bolted:/app
+      - ./results/decoder_bolted3/model:/app/model
+      - ~/.cache:/home/docker/.cache:cached
+    ports:
+      - "8804:8804"
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities:
+                - gpu
+
+networks:
+  plant-network:
+    name: plant-network

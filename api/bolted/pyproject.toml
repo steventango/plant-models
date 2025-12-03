@@ -1,0 +1,20 @@
+[project]
+name = "bolted"
+version = "0.1.0"
+description = "Bolted classification API"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "flax>=0.12.1",
+    "jax[cpu]>=0.4.0",
+    "litserve>=0.2.8",
+    "numpy>=1.24.0",
+    "orbax-checkpoint>=0.5.0",
+    "pip>=25.3",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.1",
+    "requests>=2.32.5",
+]
