@@ -8,8 +8,10 @@ dependencies = [
     "flax>=0.12.1",
     "google-metrax>=0.2.4",
     "matplotlib>=3.10.7",
+    "pandas>=2.3.3",
     "polars>=1.35.2",
     "scikit-learn>=1.7.2",
+    "seaborn>=0.13.2",
     "tensorflow>=2.20.0",
     "tqdm>=4.67.1",
 ]
