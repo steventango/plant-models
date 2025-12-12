@@ -12,7 +12,7 @@ from sklearn.metrics.pairwise import cosine_similarity
 
 from dataset import load_data, prepare_data
 from network import MLP
-from plot import plot_rollout_trajectories
+from plot import plot_trajectories
 
 
 def load_model(checkpoint_path: Path, input_dim: int, output_heads: dict[str, int]):
@@ -318,7 +318,7 @@ def main():
 
     # Plot trajectories
     logging.info("Plotting trajectories...")
-    plot_rollout_trajectories(
+    plot_trajectories(
         trajectories_with_images,
         data_dir=Path("/data/plant-rl/offline"),
         output_dir=output_dir,

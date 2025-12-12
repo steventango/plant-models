@@ -105,3 +105,93 @@ def plot_confusion_matrix(
     output_path = output_dir / filename
     plt.savefig(output_path)
     logging.info(f"Aggregated confusion matrix saved to {output_path}")
+
+
+def plot_trajectories(
+    trajectories,
+    data_dir,
+    output_dir,
+    policy_name="policy",
+    filename="trajectories.pdf",
+):
+    """
+    Plot K trajectories as a grid.
+
+    Each row is a trajectory, each column is a timestep.
+
+    Args:
+        trajectories: List of trajectories, where each trajectory is a list of dicts
+                     containing 'image_path', 'action', 'area', 'similarity'
+        data_dir: Base directory for images
+        output_dir: Output directory for plot
+        policy_name: Name of the policy used
+        filename: Output filename
+    """
+    if not trajectories:
+        logging.warning("No trajectories to plot")
+        return
+
+    n_trajectories = len(trajectories)
+    n_steps = max(len(t) for t in trajectories)
+
+    # Create figure: n_trajectories rows, n_steps columns (max 7 per row)
+    MAX_COLS = 7
+    cols = min(n_steps, MAX_COLS)
+    rows_per_traj = int(np.ceil(n_steps / cols))
+    total_rows = n_trajectories * rows_per_traj
+
+    fig, axs = plt.subplots(
+        total_rows, cols, figsize=(cols * 2, total_rows * 2), squeeze=False
+    )
+
+    # Turn off axes for all subplots initially
+    for ax in axs.flat:
+        ax.axis("off")
+
+    for traj_idx, trajectory in enumerate(trajectories):
+        for step_idx, step in enumerate(trajectory):
+            # Calculate row and col
+            row_in_traj = step_idx // cols
+            col_in_traj = step_idx % cols
+
+            abs_row = traj_idx * rows_per_traj + row_in_traj
+            abs_col = col_in_traj
+
+            ax = axs[abs_row, abs_col]
+
+            # Load and display image
+            image_path = step["image_path"]
+            if isinstance(image_path, (bytes, np.bytes_)):
+                image_path = image_path.decode("utf-8")
+            full_path = f"{data_dir}/{image_path}"
+
+            try:
+                img = Image.open(full_path)
+                ax.imshow(img)
+
+                title = f"t={step_idx}\n"
+                area_val = step.get("dataset_area")
+                if area_val is not None:
+                    title += f"Area: {area_val:.0f}"
+                else:
+                    title += "Area: N/A"
+
+                ax.set_title(title, fontsize=8)
+            except Exception as e:
+                logging.warning(f"Could not load image {full_path}: {e}")
+                ax.text(
+                    0.5,
+                    0.5,
+                    "Image\nNot Found",
+                    ha="center",
+                    va="center",
+                    transform=ax.transAxes,
+                )
+
+            ax.axis("off")
+
+    plt.tight_layout()
+    output_path = output_dir / filename
+    plt.savefig(output_path, bbox_inches="tight")
+    logging.info(f"Rollout trajectories plot saved to {output_path}")
+    plt.close(fig)
