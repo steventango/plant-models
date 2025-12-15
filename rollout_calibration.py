@@ -61,7 +61,7 @@ def main():
         obs, info = env.reset(seed=i + args.seed)
 
         clean_area_idx = 1
-        areas = [obs[clean_area_idx]]
+        areas = [info["area"]]
         rewards = []
         traj_data = []
 
@@ -75,7 +75,7 @@ def main():
             traj_data.append(step_data)
 
             obs = next_obs
-            areas.append(obs[clean_area_idx])
+            areas.append(info["area"])
             rewards.append(reward)
 
             if terminated:

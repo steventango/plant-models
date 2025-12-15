@@ -57,6 +57,10 @@ class PlantCalibrationModel(gym.Env):
             current_idx += T
             returns.append(np.sum(rews))
 
+
+        area = [obs[:, 1] for obs in observations]
+
+        self.area = np.concatenate(area, axis=0)
         self.X_state_np = np.concatenate(observations, axis=0)
         self.X_action_np = np.concatenate(actions, axis=0)
         self.X_next_state_np = np.concatenate(next_observations, axis=0)
@@ -109,7 +113,7 @@ class PlantCalibrationModel(gym.Env):
 
         self.current_return = 0.0
 
-        return self.current_state, {}
+        return self.current_state, {"area": self.area[dataset_idx]}
 
     def step(self, action):
         # Normalize State
@@ -146,7 +150,7 @@ class PlantCalibrationModel(gym.Env):
 
             reward = self.default_return - self.current_return
             self.current_return += reward
-            return self.current_state, reward, True, False, {"error": error_msg}
+            return self.current_state, reward, True, False, {"error": error_msg, "area": self.area[idx]}
 
         idx = int(idx)
 
@@ -165,7 +169,9 @@ class PlantCalibrationModel(gym.Env):
 
         self.current_return += reward
 
-        return self.current_state, reward, terminated, truncated, {}
+        return self.current_state, reward, terminated, truncated, {
+            "area": self.area[idx],
+        }
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _find_neighbor(
