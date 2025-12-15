@@ -34,8 +34,8 @@ def main():
     parser.add_argument(
         "--num_rollouts", type=int, default=64, help="Number of rollouts"
     )
-    parser.add_argument("--output_plot", type=str, default="rollout_results.png")
-    parser.add_argument("--output_image_plot", type=str, default="rollout_images.png")
+    parser.add_argument("--output_plot", type=str, default="results/rollout_results.png")
+    parser.add_argument("--output_image_plot", type=str, default="results/rollout_images.png")
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     args = parser.parse_args()
 
