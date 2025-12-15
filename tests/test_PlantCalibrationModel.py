@@ -52,3 +52,32 @@ def test_rollout():
         obs, r, term, trunc, _ = env.step(action)
         if term or trunc:
             break
+
+
+def test_no_neighbor_termination():
+    """Test that the env terminates with default return if no neighbor is found."""
+    env = PlantCalibrationModel(dataset_id="plant-data/mixed-v18", k=3)
+    env.reset(seed=42)
+
+    action = env.action_space.sample()
+    action[:] = 0.0
+
+    obs, reward, terminated, truncated, info = env.step(action)
+
+    assert terminated is True
+    assert reward == env.default_return
+
+
+def test_threshold_termination():
+    """Test that the env terminates if the best neighbor violates thresholds."""
+    env = PlantCalibrationModel(
+        dataset_id="plant-data/mixed-v18", k=3, max_state_dist=0.0, max_action_dist=0.0
+    )
+    env.reset(seed=42)
+
+    action = env.action_space.sample()
+
+    obs, reward, terminated, truncated, info = env.step(action)
+
+    assert terminated is True
+    assert reward == env.default_return
