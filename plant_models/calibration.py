@@ -283,56 +283,73 @@ class PlantCalibrationModel(gym.Env):
         total_dist = dist_stat + dist_emb + dist_action
         scores = -total_dist
 
-        # Mask out seen states
-        scores = jnp.where(seen_mask, -jnp.inf, scores)
+        # Identify Valid Thresholds
+        stat_ok = dist_stat <= self.max_stat_dist
+        emb_ok = dist_emb <= self.max_emb_dist
+        action_ok = dist_action <= self.max_action_dist
+        all_ok = stat_ok & emb_ok & action_ok
 
-        # Top K
-        top_k_scores, top_k_indices = jax.lax.top_k(scores, self.k)
+        # --- Primary Search: Valid Neighbors (within thresholds) ---
+        # Mask out seen states AND invalid thresholds
+        valid_scores = jnp.where(seen_mask | (~all_ok), -jnp.inf, scores)
 
-        best_idx = top_k_indices[0]
+        # Top K valid
+        top_k_scores, top_k_indices = jax.lax.top_k(valid_scores, self.k)
 
-        # Recalculate best distances for the chosen candidate to return
-        best_stat_dist = dist_stat[best_idx]
-        best_emb_dist = dist_emb[best_idx]
-        best_action_dist = dist_action[best_idx]
+        # Did we find at least one valid neighbor?
+        found_valid = top_k_scores[0] > -1e9
 
-        found = top_k_scores[0] > -1e9
-
-        stat_ok = best_stat_dist <= self.max_stat_dist
-        emb_ok = best_emb_dist <= self.max_emb_dist
-        action_ok = best_action_dist <= self.max_action_dist
-
-        # Failure Checks
-        # Priority: Action > Emb > Stat
-        failure_code = -1  # No neighbors found
-
-        # If found, check thresholds
-        # If action fails -> -4
-        # Else if emb fails -> -3
-        # Else if stat fails -> -2
-        # Else -> valid index
-
-        failure_code = jax.lax.select(
-            action_ok, -2, -4
-        )  # If action ok, maybe stat failed (-2). If not, -4.
-        failure_code = jax.lax.select(
-            emb_ok, failure_code, -3
-        )  # If emb ok, keep previous. If not, -3.
-
-        # If everything ok, we use best_idx. If any failed, we use failure_code.
-        neighbor_valid = stat_ok & emb_ok & action_ok
-
-        # If not found at all, stays -1.
-        final_validity = found & neighbor_valid
-
-        # Softmax sampling from top K
-        probs = jax.nn.softmax(top_k_scores)
+        # Handle NaNs in Softmax if entirely empty (all -inf)
+        # If found_valid is False, these probs don't matter, but we want to avoid NaNs
+        safe_top_k = jnp.where(jnp.isneginf(top_k_scores), -1e9, top_k_scores)
+        probs = jax.nn.softmax(safe_top_k)
         choice_idx = jax.random.choice(key, top_k_indices, p=probs)
-        new_mask = seen_mask.at[choice_idx].set(True)
 
-        final_idx = jax.lax.select(final_validity, choice_idx, failure_code)
+        # --- Fallback Search: Best Invalid Neighbor ---
+        # Used only if 'found_valid' is False, to determine error code.
+        # Mask out ONLY seen states (ignore thresholds)
+        fallback_scores = jnp.where(seen_mask, -jnp.inf, scores)
+        fallback_val, fallback_indices = jax.lax.top_k(fallback_scores, 1)
+        fallback_idx = fallback_indices[0]
+        found_any = fallback_val[0] > -1e9
 
-        # Only return -1 if truly nothing found (mask full or similar)
-        final_idx = jax.lax.select(found, final_idx, -1)
+        # Determine failure code based on fallback candidate
+        f_emb_ok = emb_ok[fallback_idx]
+        f_action_ok = action_ok[fallback_idx]
+
+        # Priority: Emb > Action > Stat (matches original logic per case analysis)
+        # If Emb fails -> -3
+        # Elif Action fails -> -4
+        # Else (Stat must be fail) -> -2
+        failure_code = -2  # Default to stat failure
+        failure_code = jax.lax.select(f_action_ok, failure_code, -4)
+        failure_code = jax.lax.select(f_emb_ok, failure_code, -3)
+
+        # --- Final Selection ---
+        # If valid found: use choice_idx
+        # If valid NOT found but any found: use failure_code
+        # If truly nothing found (all seen): -1
+        final_idx = jax.lax.select(found_valid, choice_idx, failure_code)
+        final_idx = jax.lax.select(found_any, final_idx, -1)
+
+        # Update Mask Logic
+        # Strictly speaking, we only consume the neighbor if we successfully selected it (found_valid)
+        new_mask = jax.lax.select(
+            found_valid, seen_mask.at[choice_idx].set(True), seen_mask
+        )
+
+        # Reporting Distances
+        # If valid, report distances of chosen one.
+        # If invalid, report distances of fallback one (to show what failed).
+        target_idx = jax.lax.select(found_valid, choice_idx, fallback_idx)
+
+        # Guard against target_idx being invalid if nothing found at all
+        # (Though if nothing found, we return -1 and distances don't matter much,
+        # but we must access arrays safely. fallback_idx defaults to 0 if all -inf?
+        # top_k indices for -inf are usually 0 or indices. Let's trust top_k returns in-bound indices.)
+
+        best_stat_dist = dist_stat[target_idx]
+        best_emb_dist = dist_emb[target_idx]
+        best_action_dist = dist_action[target_idx]
 
         return final_idx, new_mask, best_stat_dist, best_emb_dist, best_action_dist
