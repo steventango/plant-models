@@ -166,14 +166,13 @@ def main():
     axes[0].grid(True, alpha=0.3)
     axes[0].legend(title="Policy")
 
-    # Seaborn barplot for Dataset Returns
-    sns.barplot(
+    # Seaborn violinplot for Dataset Returns
+    sns.violinplot(
         data=df_returns[df_returns["Metric"] == "Dataset Return"],
         x="Policy",
         y="Value",
         hue="Policy",
         palette=custom_palette,
-        errorbar=("ci", 95),
         ax=axes[1],
     )
 
