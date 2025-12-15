@@ -73,7 +73,12 @@ def main():
         clean_area_idx = 1
         areas = [info["area"]]
         rewards = []
-        traj_data = []
+        traj_data = [
+            {
+                "dataset_area": info["area"],
+                "image_path": info.get("image_path"),
+            }
+        ]
 
         for t in range(args.steps):
             action = agent.act(obs)
@@ -82,17 +87,22 @@ def main():
                 "dataset_area": next_obs[clean_area_idx],
                 "image_path": info.get("image_path"),
             }
-            traj_data.append(step_data)
 
             obs = next_obs
-            areas.append(info["area"])
-            rewards.append(reward)
             
             if terminated:
                 logger.info(f"Rollout {i} terminated at step {t}")
                 if "error" in info:
                     logger.info(f"Termination reason: {info['error']}")
+                else:
+                    traj_data.append(step_data)
+                    areas.append(info["area"])
+                    rewards.append(reward)
                 break
+            else:
+                traj_data.append(step_data)
+                areas.append(info["area"])
+                rewards.append(reward)
 
         all_trajectories.append(traj_data)
         plt.plot(areas, label=f"Rollout {i}")
