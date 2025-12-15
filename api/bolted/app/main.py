@@ -88,7 +88,6 @@ class BoltedAPI(ls.LitAPI):
 
 
 if __name__ == "__main__":
-    
     model_path = os.environ.get("MODEL_PATH", "/app/model")
     port = int(os.environ.get("PORT", "8804"))
 

@@ -109,7 +109,6 @@ def plot_confusion_matrix(
 
 def plot_trajectories(
     trajectories,
-    data_dir,
     output_dir,
     policy_name="policy",
     filename="trajectories.pdf",
@@ -122,7 +121,6 @@ def plot_trajectories(
     Args:
         trajectories: List of trajectories, where each trajectory is a list of dicts
                      containing 'image_path', 'action', 'area', 'similarity'
-        data_dir: Base directory for images
         output_dir: Output directory for plot
         policy_name: Name of the policy used
         filename: Output filename
@@ -163,10 +161,9 @@ def plot_trajectories(
             image_path = step["image_path"]
             if isinstance(image_path, (bytes, np.bytes_)):
                 image_path = image_path.decode("utf-8")
-            full_path = f"{data_dir}/{image_path}"
 
             try:
-                img = Image.open(full_path)
+                img = Image.open(image_path)
                 ax.imshow(img)
 
                 title = f"t={step_idx}\n"
@@ -178,7 +175,7 @@ def plot_trajectories(
 
                 ax.set_title(title, fontsize=8)
             except Exception as e:
-                logging.warning(f"Could not load image {full_path}: {e}")
+                logging.warning(f"Could not load image {image_path}: {e}")
                 ax.text(
                     0.5,
                     0.5,
