@@ -1,4 +1,5 @@
 import functools
+import math
 
 import gymnasium as gym
 import jax
@@ -39,8 +40,9 @@ class PlantCalibrationModel(gym.Env):
         current_idx = 0
 
         for episode in self.dataset:
-            self.initial_indices.append(current_idx)
             obs = episode.observations
+            if math.isclose(obs[0, 0], 0.0):
+                self.initial_indices.append(current_idx)
             acts = episode.actions
             rews = episode.rewards
             terms = episode.terminations
