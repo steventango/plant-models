@@ -41,7 +41,8 @@ class PlantCalibrationModel(gym.Env):
 
         for episode in self.dataset:
             obs = episode.observations
-            if math.isclose(obs[0, 0], 0.0):
+            # wall_time == 0.0 and area > 0.0
+            if math.isclose(obs[0, 0], 0.0) and obs[0, 1] > 0.0:
                 self.initial_indices.append(current_idx)
             acts = episode.actions
             rews = episode.rewards
