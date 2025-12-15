@@ -25,7 +25,7 @@ def main():
     parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v19")
     parser.add_argument("--K", type=int, default=3, help="Number of neighbors")
     parser.add_argument(
-        "--max_state_dist", type=float, default=0.3, help="Max state distance"
+        "--max_state_dist", type=float, default=0.5, help="Max state distance"
     )
     parser.add_argument(
         "--max_action_dist", type=float, default=0.1, help="Max action distance"
