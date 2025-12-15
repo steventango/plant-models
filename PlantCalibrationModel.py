@@ -150,7 +150,9 @@ class PlantCalibrationModel(gym.Env):
         self.current_state = np.array(next_state)
         reward = float(reward)
         terminated = bool(terminated)
-        truncated = bool(truncated)
+        # Ignore truncated flag to allow stitching trajectories
+        truncated = False
+        terminated = bool(terminated)
 
         self.current_return += reward
 

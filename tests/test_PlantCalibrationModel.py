@@ -48,6 +48,19 @@ def test_rollout():
             break
 
 
+def test_stitching():
+    """Test that the environment continues (doesn't truncate) when hitting a truncated state."""
+    env = PlantCalibrationModel(dataset_id="plant-data/mixed-v18", k=3)
+    env.reset(seed=42)
+
+    env.truncateds_np[:] = True
+
+    action = env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
+
+    assert truncated is False
+
+
 def test_no_neighbor_termination():
     """Test that the env terminates with default return if no neighbor is found."""
     env = PlantCalibrationModel(dataset_id="plant-data/mixed-v18", k=3)
