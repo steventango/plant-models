@@ -84,7 +84,6 @@ def main():
             obs, info = env.reset(seed=args.seed + i)
 
             current_area = info["area"]
-            initial_area = current_area
 
             # Record initial area (Step 0)
             results.append(
