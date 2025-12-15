@@ -76,7 +76,6 @@ def main():
     results = []
     returns_results = []
 
-
     for policy in policies:
         logger.info(f"Running rollouts for policy: {policy}")
         policy_rng = np.random.default_rng(args.seed)
@@ -123,23 +122,11 @@ def main():
                 if terminated or truncated:
                     break
 
-            # Metrics
-            growth = current_area / initial_area if initial_area > 0 else 0.0
-
             returns_results.append(
                 {
                     "Policy": policy,
                     "Value": current_return,
                     "Metric": "Dataset Return",
-                    "RolloutID": i,
-                }
-            )
-
-            returns_results.append(
-                {
-                    "Policy": policy,
-                    "Value": growth,
-                    "Metric": "Growth Ratio",
                     "RolloutID": i,
                 }
             )
@@ -159,7 +146,7 @@ def main():
         "Constant Blue": "blue",
     }
 
-    fig, axes = plt.subplots(3, 1, figsize=(12, 18))
+    fig, axes = plt.subplots(2, 1, figsize=(12, 12))
 
     # Seaborn lineplot for Areas
     sns.lineplot(
@@ -194,22 +181,6 @@ def main():
     axes[1].set_xlabel("Policy")
     axes[1].set_ylabel("Return")
     axes[1].grid(True, alpha=0.3)
-
-    # Seaborn barplot for Growth Ratio
-    sns.barplot(
-        data=df_returns[df_returns["Metric"] == "Growth Ratio"],
-        x="Policy",
-        y="Value",
-        hue="Policy",
-        palette=custom_palette,
-        errorbar=("ci", 95),
-        ax=axes[2],
-    )
-
-    axes[2].set_title("Policy Comparison - Growth Ratio (Final / Initial)")
-    axes[2].set_xlabel("Policy")
-    axes[2].set_ylabel("Growth Ratio")
-    axes[2].grid(True, alpha=0.3)
 
     plt.tight_layout()
     plt.savefig(args.output_plot)
