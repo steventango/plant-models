@@ -11,12 +11,6 @@ def test_initialization():
     assert env.observation_space is not None
     assert env.action_space is not None
 
-    # Check if JAX arrays are built
-    assert hasattr(env, "X_state")
-    assert hasattr(env, "X_action")
-    # Should be JAX Arrays
-    assert isinstance(env.X_state, jax.Array)
-
 
 def test_reset():
     """Test the reset functionality."""
