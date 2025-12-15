@@ -39,6 +39,8 @@ class PlantCalibrationModel(gym.Env):
         self.initial_indices = []
         current_idx = 0
 
+        image_paths = []
+
         for episode in self.dataset:
             obs = episode.observations
             # wall_time == 0.0 and area > 0.0
@@ -48,6 +50,11 @@ class PlantCalibrationModel(gym.Env):
             rews = episode.rewards
             terms = episode.terminations
             truncs = episode.truncations
+
+            imgs = episode.infos.get("image_path", [None] * len(obs))
+            if len(imgs) != len(obs):
+                imgs = [None] * len(obs)
+
             T = len(acts)
             observations.append(obs[:-1])
             next_observations.append(obs[1:])
@@ -55,6 +62,8 @@ class PlantCalibrationModel(gym.Env):
             rewards.append(rews)
             terminals.append(terms)
             truncateds.append(truncs)
+            image_paths.append(imgs[:-1])
+
             current_idx += T
             returns.append(np.sum(rews))
 
@@ -62,6 +71,7 @@ class PlantCalibrationModel(gym.Env):
         area = [obs[:, 1] for obs in observations]
 
         self.area = np.concatenate(area, axis=0)
+        self.image_paths = np.concatenate(image_paths, axis=0)
         self.X_state_np = np.concatenate(observations, axis=0)
         self.X_action_np = np.concatenate(actions, axis=0)
         self.X_next_state_np = np.concatenate(next_observations, axis=0)
@@ -114,7 +124,10 @@ class PlantCalibrationModel(gym.Env):
 
         self.current_return = 0.0
 
-        return self.current_state, {"area": self.area[dataset_idx]}
+        return self.current_state, {
+            "area": self.area[dataset_idx],
+            "image_path": self.image_paths[dataset_idx],
+        }
 
     def step(self, action):
         # Normalize State
@@ -151,7 +164,17 @@ class PlantCalibrationModel(gym.Env):
 
             reward = self.default_return - self.current_return
             self.current_return += reward
-            return self.current_state, reward, True, False, {"error": error_msg, "area": self.area[idx]}
+            return (
+                self.current_state,
+                reward,
+                True,
+                False,
+                {
+                    "error": error_msg,
+                    "area": self.area[idx],
+                    "image_path": self.image_paths[idx],
+                },
+            )
 
         idx = int(idx)
 
@@ -170,9 +193,16 @@ class PlantCalibrationModel(gym.Env):
 
         self.current_return += reward
 
-        return self.current_state, reward, terminated, truncated, {
-            "area": self.area[idx],
-        }
+        return (
+            self.current_state,
+            reward,
+            terminated,
+            truncated,
+            {
+                "area": self.area[idx],
+                "image_path": self.image_paths[idx],
+            },
+        )
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _find_neighbor(
@@ -198,7 +228,6 @@ class PlantCalibrationModel(gym.Env):
         best_idx = top_k_indices[0]
         best_state_dist = 1 - sim_state[best_idx]
         best_action_dist = 1 - sim_action[best_idx]
-
 
         found = top_k_scores[0] > -1e9
         state_ok = best_state_dist <= self.max_state_dist

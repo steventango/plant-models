@@ -1,12 +1,13 @@
 import argparse
 import logging
+from pathlib import Path
 
 import matplotlib.pyplot as plt
-from etils.etqdm.tqdm_utils import tqdm
+from tqdm import tqdm
 import numpy as np
 
 from PlantCalibrationModel import PlantCalibrationModel
-# from plot import plot_trajectories
+from plot import plot_trajectories
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -34,8 +35,12 @@ def main():
     parser.add_argument(
         "--num_rollouts", type=int, default=64, help="Number of rollouts"
     )
-    parser.add_argument("--output_plot", type=str, default="results/rollout_results.png")
-    parser.add_argument("--output_image_plot", type=str, default="results/rollout_images.png")
+    parser.add_argument(
+        "--output_plot", type=str, default="results/rollout_results.png"
+    )
+    parser.add_argument(
+        "--output_image_plot", type=str, default="results/rollout_images.png"
+    )
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     args = parser.parse_args()
 
@@ -70,7 +75,7 @@ def main():
             next_obs, reward, terminated, truncated, info = env.step(action)
             step_data = {
                 "dataset_area": next_obs[clean_area_idx],
-                "image_path": None,
+                "image_path": info.get("image_path"),
             }
             traj_data.append(step_data)
 
@@ -83,7 +88,7 @@ def main():
                 if "error" in info:
                     logger.info(f"Termination reason: {info['error']}")
                 break
-        
+
         all_trajectories.append(traj_data)
         plt.plot(areas, label=f"Rollout {i}")
 
@@ -96,12 +101,11 @@ def main():
     logger.info(f"Saved rollout plot to {args.output_plot}")
 
     # Plot images
-    # plot_trajectories(
-    #     all_trajectories,
-    #     data_dir="",  # Paths are absolute
-    #     output_dir=Path("."),  # Save to current dir
-    #     filename=args.output_image_plot,
-    # )
+    plot_trajectories(
+        all_trajectories,
+        output_dir=Path("."),
+        filename=args.output_image_plot,
+    )
 
 
 if __name__ == "__main__":
