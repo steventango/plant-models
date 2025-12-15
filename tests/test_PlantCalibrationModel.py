@@ -1,7 +1,7 @@
 import gymnasium as gym
 import jax
 
-from PlantCalibrationModel import PlantCalibrationModel
+from plant_models import PlantCalibrationModel
 
 
 def test_initialization():

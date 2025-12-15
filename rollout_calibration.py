@@ -6,7 +6,7 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 import numpy as np
 
-from PlantCalibrationModel import PlantCalibrationModel
+from plant_models import PlantCalibrationModel
 from plot import plot_trajectories
 
 logging.basicConfig(level=logging.INFO)

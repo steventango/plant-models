@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tqdm import tqdm
 
-from PlantCalibrationModel import PlantCalibrationModel
+from plant_models import PlantCalibrationModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
