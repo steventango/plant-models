@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 from pathlib import Path
 from tqdm import tqdm
 
-from calibration_model import CalibrationModel
+from PlantCalibrationModel import PlantCalibrationModel
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -35,23 +35,13 @@ def get_policy_action(policy_name: str, rng: np.random.Generator):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument(
-        "--data_path", type=str, default="/data/plant-rl/offline/v18/mixed-v18.parquet"
-    )
-    parser.add_argument(
-        "--norm_path",
-        type=str,
-        default="/data/plant-rl/offline/v18/normalization-stats-v18.json",
-    )
+    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v19")
     parser.add_argument("--K", type=int, default=3, help="Number of neighbors")
     parser.add_argument(
-        "--state_threshold", type=float, default=0.9, help="State similarity threshold"
+        "--max_state_dist", type=float, default=0.5, help="Max state distance"
     )
     parser.add_argument(
-        "--action_threshold",
-        type=float,
-        default=0.6,
-        help="Action similarity threshold",
+        "--max_action_dist", type=float, default=0.1, help="Max action distance"
     )
     parser.add_argument("--steps", type=int, default=13, help="Rollout steps")
     parser.add_argument(
@@ -66,21 +56,13 @@ def main():
     # Ensure output directory exists
     Path(args.output_plot).parent.mkdir(parents=True, exist_ok=True)
 
-    # Configuration
-    state_cols = ["cls_token", "clean_area", "wall_time"]
-    action_cols = ["action_coefficients"]
-
     # Initialize Model
-    logger.info("Initializing Calibration Model...")
-    model = CalibrationModel(
-        data_path=args.data_path,
-        normalization_path=args.norm_path,
-        state_cols=state_cols,
-        action_cols=action_cols,
-        K=args.K,
-        state_threshold=args.state_threshold,
-        action_threshold=args.action_threshold,
-        seed=args.seed,
+    logger.info("Initializing PlantCalibrationModel...")
+    env = PlantCalibrationModel(
+        dataset_id=args.dataset_id,
+        k=args.K,
+        max_state_dist=args.max_state_dist,
+        max_action_dist=args.max_action_dist,
     )
 
     policies = [
@@ -91,37 +73,26 @@ def main():
         "Constant Blue",
     ]
 
-    # Pre-sample initial states so all policies start from the same conditions
-    logger.info(f"Sampling {args.num_rollouts} initial states...")
-    initial_states = []
-    for i in range(args.num_rollouts):
-        state, seen = model.sample_initial_state(seed=args.seed + i)
-        initial_states.append(
-            (state, seen)
-        )  # Store independent copies/seeds if needed?
-        # sample_initial_state returns a new 'seen' set with just that index.
-        # But we need fresh 'seen' for each rollout.
-        # So we just store the initial state dictionary. 'seen' needs to be reset per rollout.
-
     results = []
     returns_results = []
 
-    rng = np.random.default_rng(args.seed)
 
     for policy in policies:
         logger.info(f"Running rollouts for policy: {policy}")
+        policy_rng = np.random.default_rng(args.seed)
 
-        for i in tqdm(range(args.num_rollouts)):
-            init_state_dict, init_seen = initial_states[i]
-            state = init_state_dict.copy()
-            seen = init_seen.copy()
+        for i in tqdm(range(args.num_rollouts), desc=policy):
+            obs, info = env.reset(seed=args.seed + i)
+
+            current_area = info["area"]
+            initial_area = current_area
 
             # Record initial area (Step 0)
             results.append(
                 {
                     "Policy": policy,
                     "Step": 0,
-                    "Area": state["clean_area"],
+                    "Area": current_area,
                     "RolloutID": i,
                 }
             )
@@ -130,42 +101,30 @@ def main():
 
             for t in range(1, args.steps + 1):
                 # Generate Action
-                action_vec = get_policy_action(policy, rng)
-                action = {"action_coefficients": action_vec}
+                action_vec = get_policy_action(policy, policy_rng)
 
-                # Predict Next State
-                next_state, reward, term, info, seen = model.predict(
-                    state, action, seen
-                )
+                # Step
+                next_obs, reward, terminated, truncated, info = env.step(action_vec)
 
-                if reward is None:
-                    current_return = model.default_return
-                else:
-                    current_return += reward
-
-                if next_state is None:
-                    break
+                current_area = info["area"]
 
                 # Record result
                 results.append(
                     {
                         "Policy": policy,
                         "Step": t,
-                        "Area": next_state["clean_area"],
+                        "Area": current_area,
                         "RolloutID": i,
                     }
                 )
 
-                if term:
+                current_return += reward
+
+                if terminated or truncated:
                     break
 
-                state = next_state
-
-            growth = (
-                state["clean_area"] / init_state_dict["clean_area"]
-                if init_state_dict["clean_area"] > 0
-                else 0.0
-            )
+            # Metrics
+            growth = current_area / initial_area if initial_area > 0 else 0.0
 
             returns_results.append(
                 {
