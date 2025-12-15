@@ -22,17 +22,17 @@ class ConstantAgent:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v18")
+    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v19")
     parser.add_argument("--K", type=int, default=3, help="Number of neighbors")
     parser.add_argument(
-        "--max_state_dist", type=float, default=1.0, help="Max state distance"
+        "--max_state_dist", type=float, default=0.3, help="Max state distance"
     )
     parser.add_argument(
-        "--max_action_dist", type=float, default=1.0, help="Max action distance"
+        "--max_action_dist", type=float, default=0.1, help="Max action distance"
     )
     parser.add_argument("--steps", type=int, default=13, help="Rollout steps")
     parser.add_argument(
-        "--num_rollouts", type=int, default=5, help="Number of rollouts"
+        "--num_rollouts", type=int, default=64, help="Number of rollouts"
     )
     parser.add_argument("--output_plot", type=str, default="rollout_results.png")
     parser.add_argument("--output_image_plot", type=str, default="rollout_images.png")
