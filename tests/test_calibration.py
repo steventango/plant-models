@@ -136,3 +136,24 @@ def test_threshold_termination():
 
     assert terminated is True
     assert reward == env.default_return
+
+def test_render():
+    """Test the render functionality."""
+    env = PlantCalibrationModel(dataset_id="plant-data/mixed-v19", render_mode="rgb_array")
+    env.reset(seed=42)
+
+    img = env.render()
+    assert img is not None
+    assert img.shape == (224, 224, 3)
+
+    action = env.action_space.sample()
+    env.step(action)
+
+    img = env.render()
+    assert img is not None
+    assert img.shape == (224, 224, 3)
+
+    # Test invalid render mode
+    env = PlantCalibrationModel(dataset_id="plant-data/mixed-v19", render_mode=None)
+    env.reset()
+    assert env.render() is None

@@ -6,6 +6,7 @@ import jax
 import jax.numpy as jnp
 import minari
 import numpy as np
+from PIL import Image
 
 
 class PlantCalibrationModel(gym.Env):
@@ -13,11 +14,13 @@ class PlantCalibrationModel(gym.Env):
 
     def __init__(
         self,
-        dataset_id: str = "plant-data/mixed-v18",
+        dataset_id: str = "plant-data/mixed-v19",
         k: int = 3,
         max_state_dist: float = 0.1,
         max_action_dist: float = 0.1,
+        render_mode: str | None = None,
     ):
+        self.render_mode = render_mode
         self.dataset = minari.load_dataset(dataset_id)
         self.k = k
         self.max_state_dist = max_state_dist
@@ -66,7 +69,6 @@ class PlantCalibrationModel(gym.Env):
 
             current_idx += T
             returns.append(np.sum(rews))
-
 
         area = [obs[:, 1] for obs in observations]
 
@@ -124,6 +126,8 @@ class PlantCalibrationModel(gym.Env):
 
         self.current_return = 0.0
 
+        self.current_image_path = self.image_paths[dataset_idx]
+
         return self.current_state, {
             "area": self.area[dataset_idx],
             "image_path": self.image_paths[dataset_idx],
@@ -164,6 +168,9 @@ class PlantCalibrationModel(gym.Env):
 
             reward = self.default_return - self.current_return
             self.current_return += reward
+
+            self.current_image_path = self.image_paths[idx]
+
             return (
                 self.current_state,
                 reward,
@@ -193,6 +200,8 @@ class PlantCalibrationModel(gym.Env):
 
         self.current_return += reward
 
+        self.current_image_path = self.image_paths[idx]
+
         return (
             self.current_state,
             reward,
@@ -203,6 +212,24 @@ class PlantCalibrationModel(gym.Env):
                 "image_path": self.image_paths[idx],
             },
         )
+
+    def render(self):
+        if self.render_mode == "rgb_array":
+            if (
+                hasattr(self, "current_image_path")
+                and self.current_image_path is not None
+            ):
+                path = self.current_image_path
+                if isinstance(path, (bytes, np.bytes_)):
+                    path = path.decode("utf-8")
+
+                try:
+                    img = Image.open(path)
+                    img = img.resize((224, 224))
+                    return np.array(img)
+                except Exception:
+                    return None
+        return None
 
     @functools.partial(jax.jit, static_argnums=(0,))
     def _find_neighbor(

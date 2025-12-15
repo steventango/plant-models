@@ -20,6 +20,8 @@ dependencies = [
     "seaborn>=0.13.2",
     "tensorflow>=2.20.0",
     "tqdm>=4.67.1",
+    "numpy>=1.26.0",
+    "pillow>=10.0.0",
 ]
 
 [dependency-groups]

@@ -1437,14 +1437,16 @@ wheels = [
 [[package]]
 name = "plant-models"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
     { name = "flax" },
     { name = "google-metrax" },
     { name = "gymnasium" },
     { name = "matplotlib" },
     { name = "minari" },
+    { name = "numpy" },
     { name = "pandas" },
+    { name = "pillow" },
     { name = "polars" },
     { name = "scikit-learn" },
     { name = "seaborn" },
@@ -1464,7 +1466,9 @@ requires-dist = [
     { name = "gymnasium", specifier = ">=1.2.2" },
     { name = "matplotlib", specifier = ">=3.10.7" },
     { name = "minari", specifier = ">=0.5.3" },
+    { name = "numpy", specifier = ">=1.26.0" },
     { name = "pandas", specifier = ">=2.3.3" },
+    { name = "pillow", specifier = ">=10.0.0" },
     { name = "polars", specifier = ">=1.35.2" },
     { name = "scikit-learn", specifier = ">=1.7.2" },
     { name = "seaborn", specifier = ">=0.13.2" },
