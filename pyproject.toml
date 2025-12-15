@@ -7,7 +7,9 @@ requires-python = ">=3.11"
 dependencies = [
     "flax>=0.12.1",
     "google-metrax>=0.2.4",
+    "gymnasium>=1.2.2",
     "matplotlib>=3.10.7",
+    "minari>=0.5.3",
     "pandas>=2.3.3",
     "polars>=1.35.2",
     "scikit-learn>=1.7.2",
