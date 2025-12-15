@@ -26,14 +26,18 @@ def main():
     parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v19")
     parser.add_argument("--K", type=int, default=3, help="Number of neighbors")
     parser.add_argument(
-        "--max_state_dist", type=float, default=0.5, help="Max state distance"
+        "--max_stat_dist", type=float, default=3.0, help="Max stat distance"
     )
     parser.add_argument(
-        "--max_action_dist", type=float, default=0.1, help="Max action distance"
+        "--max_emb_dist", type=float, default=1.0, help="Max embedding distance"
+    )
+    max_action_dist = np.linalg.norm(np.array([0, 1, 0] - np.ones(3) / 3))
+    parser.add_argument(
+        "--max_action_dist", type=float, default=max_action_dist, help="Max action distance"
     )
     parser.add_argument("--steps", type=int, default=13, help="Rollout steps")
     parser.add_argument(
-        "--num_rollouts", type=int, default=64, help="Number of rollouts"
+        "--num_rollouts", type=int, default=10, help="Number of rollouts"
     )
     parser.add_argument(
         "--output_plot", type=str, default="results/rollout_results.png"
@@ -44,14 +48,15 @@ def main():
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     args = parser.parse_args()
 
-    agent = ConstantAgent(action=np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    agent = ConstantAgent(action=np.array([0.0, 0.0, 1.0], dtype=np.float32))
 
     # Initialize Model
     logger.info("Initializing PlantCalibrationModel...")
     env = PlantCalibrationModel(
         dataset_id=args.dataset_id,
         k=args.K,
-        max_state_dist=args.max_state_dist,
+        max_stat_dist=args.max_stat_dist,
+        max_emb_dist=args.max_emb_dist,
         max_action_dist=args.max_action_dist,
     )
 
@@ -82,7 +87,7 @@ def main():
             obs = next_obs
             areas.append(info["area"])
             rewards.append(reward)
-
+            
             if terminated:
                 logger.info(f"Rollout {i} terminated at step {t}")
                 if "error" in info:

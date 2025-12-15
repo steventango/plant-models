@@ -16,14 +16,16 @@ class PlantCalibrationModel(gym.Env):
         self,
         dataset_id: str = "plant-data/mixed-v19",
         k: int = 3,
-        max_state_dist: float = 0.1,
+        max_stat_dist: float = 0.1,
+        max_emb_dist: float = 0.1,
         max_action_dist: float = 0.1,
         render_mode: str | None = None,
     ):
         self.render_mode = render_mode
         self.dataset = minari.load_dataset(dataset_id)
         self.k = k
-        self.max_state_dist = max_state_dist
+        self.max_stat_dist = max_stat_dist
+        self.max_emb_dist = max_emb_dist
         self.max_action_dist = max_action_dist
         self.observation_space = self.dataset.observation_space
         self.action_space = self.dataset.action_space
@@ -75,6 +77,12 @@ class PlantCalibrationModel(gym.Env):
         self.area = np.concatenate(area, axis=0)
         self.image_paths = np.concatenate(image_paths, axis=0)
         self.X_state_np = np.concatenate(observations, axis=0)
+
+        # Split State
+        # Last 768 are embedding
+        self.X_stat_np = self.X_state_np[:, :-768]
+        self.X_emb_np = self.X_state_np[:, -768:]
+
         self.X_action_np = np.concatenate(actions, axis=0)
         self.X_next_state_np = np.concatenate(next_observations, axis=0)
         self.rewards_np = np.concatenate(rewards, axis=0)
@@ -84,25 +92,27 @@ class PlantCalibrationModel(gym.Env):
 
         self.default_return = np.min(self.returns_np)
 
-        self.X_state = jnp.array(self.X_state_np)
+        self.X_stat = jnp.array(self.X_stat_np)
+        self.X_emb = jnp.array(self.X_emb_np)
         self.X_action = jnp.array(self.X_action_np)
 
-        # Empirical stats
-        self.norm_mean = np.mean(self.X_state_np, axis=0)
-        self.norm_std = np.std(self.X_state_np, axis=0)
+        # Empirical stats for Plant Stats (Euclidean)
+        self.norm_mean = np.mean(self.X_stat_np, axis=0)
+        self.norm_std = np.std(self.X_stat_np, axis=0)
 
-        # Compute L2 Norms for Cosine Similarity
-        X_state_norm = (self.X_state_np - self.norm_mean) / np.clip(
+        # Z-Score Normalize Stats
+        X_stat_norm = (self.X_stat_np - self.norm_mean) / np.clip(
             self.norm_std, min=1e-8
         )
-        X_state_norm = jnp.array(X_state_norm)
+        self.X_stat_norm = jnp.array(X_stat_norm)
 
-        # L2 Normalize for Cosine Index
-        norm_state = jnp.linalg.norm(X_state_norm, axis=1, keepdims=True)
-        self.X_state_emb = X_state_norm / jnp.clip(norm_state, min=1e-8)
+        # L2 Normalize Embeddings (Cosine)
+        norm_emb = jnp.linalg.norm(self.X_emb, axis=1, keepdims=True)
+        self.X_emb_norm = self.X_emb / jnp.clip(norm_emb, min=1e-8)
 
-        norm_action = jnp.linalg.norm(self.X_action, axis=1, keepdims=True)
-        self.X_action_emb = self.X_action / jnp.clip(norm_action, min=1e-8)
+        # No normalization for Action, we use raw Euclidean distance on the simplex
+        # (Assuming actions are already somewhat normalized or on a simplex)
+        self.X_action_jax = self.X_action
 
         self.seen_mask = jnp.zeros(current_idx, dtype=bool)
 
@@ -121,7 +131,7 @@ class PlantCalibrationModel(gym.Env):
         self.current_state = np.array(self.X_state_np[dataset_idx])
 
         # Reset seen mask
-        self.seen_mask = jnp.zeros(self.X_state.shape[0], dtype=bool)
+        self.seen_mask = jnp.zeros(self.X_stat.shape[0], dtype=bool)
         self.seen_mask = self.seen_mask.at[dataset_idx].set(True)
 
         self.current_return = 0.0
@@ -134,35 +144,43 @@ class PlantCalibrationModel(gym.Env):
         }
 
     def step(self, action):
-        # Normalize State
-        self.norm_state = (self.current_state - self.norm_mean) / self.norm_std
+        # Normalize Query Stat
+        q_stat = self.current_state[:-768]
+        q_emb = self.current_state[-768:]
 
-        # L2 Normalize Query State
-        q_state = jnp.array(self.norm_state)
-        q_state_emb = q_state / jnp.clip(jnp.linalg.norm(q_state), min=1e-8)
+        q_stat_norm = (q_stat - self.norm_mean) / np.clip(self.norm_std, min=1e-8)
+        q_stat_norm = jnp.array(q_stat_norm)
 
-        # L2 Normalize Query Action
+        # L2 Normalize Query Embedding
+        q_emb_jax = jnp.array(q_emb)
+        q_emb_norm = q_emb_jax / jnp.clip(jnp.linalg.norm(q_emb_jax), min=1e-8)
+
+        # Query Action (Raw)
         q_action = jnp.array(action)
-        q_action_emb = q_action / jnp.clip(jnp.linalg.norm(q_action), min=1e-8)
 
         # Run Search
         self.key, subkey = jax.random.split(self.key)
 
-        idx, self.seen_mask, best_state_dist, best_action_dist = self._find_neighbor(
-            q_state_emb,
-            q_action_emb,
-            self.seen_mask,
-            self.X_state_emb,
-            self.X_action_emb,
-            subkey,
+        idx, self.seen_mask, best_stat_dist, best_emb_dist, best_action_dist = (
+            self._find_neighbor(
+                q_stat_norm,
+                q_emb_norm,
+                q_action,
+                self.seen_mask,
+                self.X_stat_norm,
+                self.X_emb_norm,
+                self.X_action_jax,
+                subkey,
+            )
         )
 
         if idx < 0:
             # Terminate if no valid neighbors, adjust reward so return is default_return
             error_codes = {
                 -1: "no_neighbors",
-                -2: f"state_threshold, best_state_dist: {best_state_dist}",
-                -3: f"action_threshold, best_action_dist: {best_action_dist}",
+                -2: f"stat_threshold: {best_stat_dist:.2f}",
+                -3: f"emb_threshold: {best_emb_dist:.2f}",
+                -4: f"action_threshold: {best_action_dist:.2f}",
             }
             error_msg = error_codes.get(int(idx), "unknown_error")
 
@@ -178,8 +196,8 @@ class PlantCalibrationModel(gym.Env):
                 False,
                 {
                     "error": error_msg,
-                    "area": self.area[idx],
-                    "image_path": self.image_paths[idx],
+                    "area": None,
+                    "image_path": None,
                 },
             )
 
@@ -234,17 +252,36 @@ class PlantCalibrationModel(gym.Env):
     @functools.partial(jax.jit, static_argnums=(0,))
     def _find_neighbor(
         self,
-        q_state: jax.Array,
+        q_stat: jax.Array,
+        q_emb: jax.Array,
         q_action: jax.Array,
         seen_mask: jax.Array,
-        X_state_emb: jax.Array,
-        X_action_emb: jax.Array,
+        X_stat_norm: jax.Array,
+        X_emb_norm: jax.Array,
+        X_action: jax.Array,
         key: jax.Array,
     ):
-        sim_state = X_state_emb @ q_state
-        sim_action = X_action_emb @ q_action
+        # 1. Stat Distance (Euclidean on Z-scored stats)
+        # ||x - q||^2 = ||x||^2 + ||q||^2 - 2 <x, q>
+        # but simpler to just compute diff since dimension is small
+        diff_stat = X_stat_norm - q_stat
+        dist_stat = jnp.sqrt(jnp.sum(diff_stat**2, axis=1))
 
-        scores = sim_state * sim_action
+        # 2. Embedding Distance (Cosine)
+        # 1 - <x, q> (since vectors are L2 normalized)
+        sim_emb = X_emb_norm @ q_emb
+        dist_emb = 1.0 - sim_emb
+        # Clip to avoid negative due to precision
+        dist_emb = jnp.maximum(dist_emb, 0.0)
+
+        # 3. Action Distance (Euclidean)
+        diff_action = X_action - q_action
+        dist_action = jnp.sqrt(jnp.sum(diff_action**2, axis=1))
+
+        # Total "Cost" (Sum of distances)
+        # Minimize Cost <-> Maximize Score
+        total_dist = dist_stat + dist_emb + dist_action
+        scores = -total_dist
 
         # Mask out seen states
         scores = jnp.where(seen_mask, -jnp.inf, scores)
@@ -253,30 +290,49 @@ class PlantCalibrationModel(gym.Env):
         top_k_scores, top_k_indices = jax.lax.top_k(scores, self.k)
 
         best_idx = top_k_indices[0]
-        best_state_dist = 1 - sim_state[best_idx]
-        best_action_dist = 1 - sim_action[best_idx]
+
+        # Recalculate best distances for the chosen candidate to return
+        best_stat_dist = dist_stat[best_idx]
+        best_emb_dist = dist_emb[best_idx]
+        best_action_dist = dist_action[best_idx]
 
         found = top_k_scores[0] > -1e9
-        state_ok = best_state_dist <= self.max_state_dist
+
+        stat_ok = best_stat_dist <= self.max_stat_dist
+        emb_ok = best_emb_dist <= self.max_emb_dist
         action_ok = best_action_dist <= self.max_action_dist
 
-        failure_code = jax.lax.select(
-            state_ok,
-            -3,
-            -2,
-        )
-        failure_code = jax.lax.select(
-            found,
-            failure_code,
-            -1,
-        )
+        # Failure Checks
+        # Priority: Action > Emb > Stat
+        failure_code = -1  # No neighbors found
 
-        valid_neighbor = found & state_ok & action_ok
+        # If found, check thresholds
+        # If action fails -> -4
+        # Else if emb fails -> -3
+        # Else if stat fails -> -2
+        # Else -> valid index
 
+        failure_code = jax.lax.select(
+            action_ok, -2, -4
+        )  # If action ok, maybe stat failed (-2). If not, -4.
+        failure_code = jax.lax.select(
+            emb_ok, failure_code, -3
+        )  # If emb ok, keep previous. If not, -3.
+
+        # If everything ok, we use best_idx. If any failed, we use failure_code.
+        neighbor_valid = stat_ok & emb_ok & action_ok
+
+        # If not found at all, stays -1.
+        final_validity = found & neighbor_valid
+
+        # Softmax sampling from top K
         probs = jax.nn.softmax(top_k_scores)
         choice_idx = jax.random.choice(key, top_k_indices, p=probs)
         new_mask = seen_mask.at[choice_idx].set(True)
 
-        final_idx = jax.lax.select(valid_neighbor, choice_idx, failure_code)
+        final_idx = jax.lax.select(final_validity, choice_idx, failure_code)
 
-        return final_idx, new_mask, best_state_dist, best_action_dist
+        # Only return -1 if truly nothing found (mask full or similar)
+        final_idx = jax.lax.select(found, final_idx, -1)
+
+        return final_idx, new_mask, best_stat_dist, best_emb_dist, best_action_dist

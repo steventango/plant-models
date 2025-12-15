@@ -38,10 +38,17 @@ def main():
     parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v19")
     parser.add_argument("--K", type=int, default=3, help="Number of neighbors")
     parser.add_argument(
-        "--max_state_dist", type=float, default=0.5, help="Max state distance"
+        "--max_stat_dist", type=float, default=3.0, help="Max stat distance"
     )
     parser.add_argument(
-        "--max_action_dist", type=float, default=0.1, help="Max action distance"
+        "--max_emb_dist", type=float, default=1.0, help="Max embedding distance"
+    )
+    max_action_dist = np.linalg.norm(np.array([0, 1, 0] - np.ones(3) / 3))
+    parser.add_argument(
+        "--max_action_dist",
+        type=float,
+        default=max_action_dist,
+        help="Max action distance",
     )
     parser.add_argument("--steps", type=int, default=13, help="Rollout steps")
     parser.add_argument(
@@ -61,7 +68,8 @@ def main():
     env = PlantCalibrationModel(
         dataset_id=args.dataset_id,
         k=args.K,
-        max_state_dist=args.max_state_dist,
+        max_stat_dist=args.max_stat_dist,
+        max_emb_dist=args.max_emb_dist,
         max_action_dist=args.max_action_dist,
     )
 
@@ -71,6 +79,7 @@ def main():
         "Constant Red",
         "Constant White",
         "Constant Blue",
+        "Constant White Blue",
     ]
 
     results = []
@@ -143,6 +152,7 @@ def main():
         "Constant Red": "red",
         "Constant White": "black",
         "Constant Blue": "blue",
+        "Constant White Blue": "lightblue",
     }
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 12))
