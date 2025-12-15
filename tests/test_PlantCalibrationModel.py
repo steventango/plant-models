@@ -75,6 +75,50 @@ def test_no_neighbor_termination():
     assert reward == env.default_return
 
 
+def test_error_no_neighbors():
+    """Test 'no_neighbors' error code."""
+    env = PlantCalibrationModel(dataset_id="plant-data/mixed-v18")
+    env.reset(seed=42)
+
+    env.seen_mask = jax.numpy.ones(env.seen_mask.shape[0], dtype=bool)
+
+    action = env.action_space.sample()
+    _, _, terminated, _, info = env.step(action)
+
+    assert terminated
+    assert info["error"] == "no_neighbors"
+
+
+def test_error_state_threshold():
+    """Test 'state_threshold' error code."""
+    # Strict state, loose action
+    env = PlantCalibrationModel(
+        dataset_id="plant-data/mixed-v18", max_state_dist=-0.1, max_action_dist=10.0
+    )
+    env.reset(seed=42)
+
+    action = env.action_space.sample()
+    _, _, terminated, _, info = env.step(action)
+
+    assert terminated
+    assert info["error"].startswith("state_threshold")
+
+
+def test_error_action_threshold():
+    """Test 'action_threshold' error code."""
+    # Loose state, strict action
+    env = PlantCalibrationModel(
+        dataset_id="plant-data/mixed-v18", max_state_dist=10.0, max_action_dist=-0.1
+    )
+    env.reset(seed=42)
+
+    action = env.action_space.sample()
+    _, _, terminated, _, info = env.step(action)
+
+    assert terminated
+    assert info["error"].startswith("action_threshold")
+
+
 def test_threshold_termination():
     """Test that the env terminates if the best neighbor violates thresholds."""
     env = PlantCalibrationModel(

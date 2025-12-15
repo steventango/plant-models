@@ -126,7 +126,7 @@ class PlantCalibrationModel(gym.Env):
         # Run Search
         self.key, subkey = jax.random.split(self.key)
 
-        idx, self.seen_mask = self._find_neighbor(
+        idx, self.seen_mask, best_state_dist, best_action_dist = self._find_neighbor(
             q_state_emb,
             q_action_emb,
             self.seen_mask,
@@ -135,11 +135,18 @@ class PlantCalibrationModel(gym.Env):
             subkey,
         )
 
-        if idx == -1:
+        if idx < 0:
             # Terminate if no valid neighbors, adjust reward so return is default_return
+            error_codes = {
+                -1: "no_neighbors",
+                -2: f"state_threshold, best_state_dist: {best_state_dist}",
+                -3: f"action_threshold, best_action_dist: {best_action_dist}",
+            }
+            error_msg = error_codes.get(int(idx), "unknown_error")
+
             reward = self.default_return - self.current_return
             self.current_return += reward
-            return self.current_state, reward, True, False, {"error": "no_neighbors"}
+            return self.current_state, reward, True, False, {"error": error_msg}
 
         idx = int(idx)
 
@@ -185,17 +192,28 @@ class PlantCalibrationModel(gym.Env):
         best_state_dist = 1 - sim_state[best_idx]
         best_action_dist = 1 - sim_action[best_idx]
 
-        # Valid if score > -inf AND distances <= thresholds
-        valid_neighbor = (
-            (top_k_scores[0] > -1e9)
-            & (best_state_dist <= self.max_state_dist)
-            & (best_action_dist <= self.max_action_dist)
+
+        found = top_k_scores[0] > -1e9
+        state_ok = best_state_dist <= self.max_state_dist
+        action_ok = best_action_dist <= self.max_action_dist
+
+        failure_code = jax.lax.select(
+            state_ok,
+            -3,
+            -2,
         )
+        failure_code = jax.lax.select(
+            found,
+            failure_code,
+            -1,
+        )
+
+        valid_neighbor = found & state_ok & action_ok
 
         probs = jax.nn.softmax(top_k_scores)
         choice_idx = jax.random.choice(key, top_k_indices, p=probs)
         new_mask = seen_mask.at[choice_idx].set(True)
 
-        final_idx = jax.lax.select(valid_neighbor, choice_idx, -1)
+        final_idx = jax.lax.select(valid_neighbor, choice_idx, failure_code)
 
-        return final_idx, new_mask
+        return final_idx, new_mask, best_state_dist, best_action_dist
