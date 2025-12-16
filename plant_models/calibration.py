@@ -19,6 +19,7 @@ class PlantCalibrationModel(gym.Env):
         max_stat_dist: float = 0.1,
         max_emb_dist: float = 0.1,
         max_action_dist: float = 0.1,
+        terminal_episode_steps: int | None = 13,
         render_mode: str | None = None,
     ):
         self.render_mode = render_mode
@@ -27,6 +28,7 @@ class PlantCalibrationModel(gym.Env):
         self.max_stat_dist = max_stat_dist
         self.max_emb_dist = max_emb_dist
         self.max_action_dist = max_action_dist
+        self.terminal_episode_steps = terminal_episode_steps
         self.observation_space = self.dataset.observation_space
         self.action_space = self.dataset.action_space
         self.key = jax.random.key(0)
@@ -180,6 +182,7 @@ class PlantCalibrationModel(gym.Env):
         self.seen_mask = self.seen_mask.at[dataset_idx].set(True)
 
         self.current_return = 0.0
+        self.current_episode_steps = 0
 
         self.current_image_path = self.image_paths[dataset_idx]
 
@@ -266,6 +269,13 @@ class PlantCalibrationModel(gym.Env):
         truncated = False
 
         self.current_return += reward
+
+        self.current_episode_steps += 1
+        if (
+            self.terminal_episode_steps is not None
+            and self.current_episode_steps >= self.terminal_episode_steps
+        ):
+            terminated = True
 
         self.current_image_path = self.image_paths[idx]
 
