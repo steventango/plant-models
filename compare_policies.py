@@ -35,13 +35,19 @@ def get_policy_action(policy_name: str, rng: np.random.Generator):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v19")
-    parser.add_argument("--K", type=int, default=3, help="Number of neighbors")
+    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-all-v20")
+    parser.add_argument("--K", type=int, default=10, help="Number of neighbors")
     parser.add_argument(
-        "--max_state_dist", type=float, default=0.5, help="Max state distance"
+        "--max_stat_dist", type=float, default=3.0, help="Max stat distance"
     )
     parser.add_argument(
-        "--max_action_dist", type=float, default=0.1, help="Max action distance"
+        "--max_emb_dist", type=float, default=1.0, help="Max embedding distance"
+    )
+    parser.add_argument(
+        "--max_action_dist",
+        type=float,
+        default=float("inf"),
+        help="Max action distance",
     )
     parser.add_argument("--steps", type=int, default=13, help="Rollout steps")
     parser.add_argument(
@@ -61,7 +67,8 @@ def main():
     env = PlantCalibrationModel(
         dataset_id=args.dataset_id,
         k=args.K,
-        max_state_dist=args.max_state_dist,
+        max_stat_dist=args.max_stat_dist,
+        max_emb_dist=args.max_emb_dist,
         max_action_dist=args.max_action_dist,
     )
 
@@ -135,6 +142,12 @@ def main():
     df_returns = pd.DataFrame(returns_results)
 
     logger.info("Plotting results...")
+
+    # Calculate and print statistics
+    logger.info("Return Statistics per Policy:")
+    stats = df_returns.groupby("Policy")["Value"].describe()
+    print(stats)
+    print("\n")
 
     # Define custom color palette
     custom_palette = {

@@ -23,17 +23,23 @@ class ConstantAgent:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v19")
-    parser.add_argument("--K", type=int, default=3, help="Number of neighbors")
+    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-all-v20")
+    parser.add_argument("--K", type=int, default=10, help="Number of neighbors")
     parser.add_argument(
-        "--max_state_dist", type=float, default=0.5, help="Max state distance"
+        "--max_stat_dist", type=float, default=3.0, help="Max stat distance"
     )
     parser.add_argument(
-        "--max_action_dist", type=float, default=0.1, help="Max action distance"
+        "--max_emb_dist", type=float, default=1.0, help="Max embedding distance"
+    )
+    parser.add_argument(
+        "--max_action_dist",
+        type=float,
+        default=float("inf"),
+        help="Max action distance",
     )
     parser.add_argument("--steps", type=int, default=13, help="Rollout steps")
     parser.add_argument(
-        "--num_rollouts", type=int, default=64, help="Number of rollouts"
+        "--num_rollouts", type=int, default=10, help="Number of rollouts"
     )
     parser.add_argument(
         "--output_plot", type=str, default="results/rollout_results.png"
@@ -44,21 +50,22 @@ def main():
     parser.add_argument("--seed", type=int, default=0, help="Random seed")
     args = parser.parse_args()
 
-    agent = ConstantAgent(action=np.array([0.0, 1.0, 0.0], dtype=np.float32))
+    agent = ConstantAgent(action=np.array([0.0, 0.0, 1.0], dtype=np.float32))
 
     # Initialize Model
     logger.info("Initializing PlantCalibrationModel...")
     env = PlantCalibrationModel(
         dataset_id=args.dataset_id,
         k=args.K,
-        max_state_dist=args.max_state_dist,
+        max_stat_dist=args.max_stat_dist,
+        max_emb_dist=args.max_emb_dist,
         max_action_dist=args.max_action_dist,
     )
 
     # Pick random start states from the dataset
     logger.info("Starting rollouts...")
 
-    plt.figure(figsize=(10, 6))
+    fig, ax = plt.subplots(2, 1, figsize=(10, 12))
 
     all_trajectories = []
 
@@ -66,9 +73,16 @@ def main():
         obs, info = env.reset(seed=i + args.seed)
 
         clean_area_idx = 1
+        wall_time_idx = 0
         areas = [info["area"]]
+        wall_times = [obs[wall_time_idx]]
         rewards = []
-        traj_data = []
+        traj_data = [
+            {
+                "dataset_area": info["area"],
+                "image_path": info.get("image_path"),
+            }
+        ]
 
         for t in range(args.steps):
             action = agent.act(obs)
@@ -77,26 +91,39 @@ def main():
                 "dataset_area": next_obs[clean_area_idx],
                 "image_path": info.get("image_path"),
             }
-            traj_data.append(step_data)
 
             obs = next_obs
-            areas.append(info["area"])
-            rewards.append(reward)
 
             if terminated:
                 logger.info(f"Rollout {i} terminated at step {t}")
                 if "error" in info:
                     logger.info(f"Termination reason: {info['error']}")
+                else:
+                    traj_data.append(step_data)
+                    areas.append(info["area"])
+                    wall_times.append(obs[wall_time_idx])
+                    rewards.append(reward)
                 break
+            else:
+                traj_data.append(step_data)
+                areas.append(info["area"])
+                wall_times.append(obs[wall_time_idx])
+                rewards.append(reward)
 
         all_trajectories.append(traj_data)
-        plt.plot(areas, label=f"Rollout {i}")
+        ax[0].plot(areas, label=f"Rollout {i}")
+        ax[1].plot(wall_times, label=f"Rollout {i}")
 
-    plt.title("Calibration Model Rollouts (Area)")
-    plt.xlabel("Step")
-    plt.ylabel("Area")
-    plt.legend()
-    plt.grid(True)
+    ax[0].set_title("Calibration Model Rollouts (Area)")
+    ax[0].set_ylabel("Area")
+    ax[0].grid(True)
+
+    ax[1].set_title("Calibration Model Rollouts (Wall Time)")
+    ax[1].set_xlabel("Step")
+    ax[1].set_ylabel("Wall Time")
+    ax[1].grid(True)
+
+    plt.tight_layout()
     plt.savefig(args.output_plot)
     logger.info(f"Saved rollout plot to {args.output_plot}")
 

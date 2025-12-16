@@ -93,11 +93,14 @@ def test_error_no_neighbors():
     assert info["error"] == "no_neighbors"
 
 
-def test_error_state_threshold():
-    """Test 'state_threshold' error code."""
+def test_error_stat_threshold():
+    """Test 'stat_threshold' error code."""
     # Strict state, loose action
     env = PlantCalibrationModel(
-        dataset_id="plant-data/mixed-v19", max_state_dist=-0.1, max_action_dist=10.0
+        dataset_id="plant-data/mixed-v19",
+        max_stat_dist=-0.1,
+        max_emb_dist=10.0,
+        max_action_dist=10.0,
     )
     env.reset(seed=42)
 
@@ -105,14 +108,32 @@ def test_error_state_threshold():
     _, _, terminated, _, info = env.step(action)
 
     assert terminated
-    assert info["error"].startswith("state_threshold")
+    assert info["error"].startswith("stat_threshold"), info["error"]
+
+
+def test_error_emb_threshold():
+    """Test 'emb_threshold' error code."""
+    # Loose stat, strict embedding, loose action
+    env = PlantCalibrationModel(
+        dataset_id="plant-data/mixed-v19",
+        max_stat_dist=10.0,
+        max_emb_dist=-0.1,
+        max_action_dist=10.0,
+    )
+    env.reset(seed=42)
+
+    action = env.action_space.sample()
+    _, _, terminated, _, info = env.step(action)
+
+    assert terminated
+    assert info["error"].startswith("emb_threshold"), info["error"]
 
 
 def test_error_action_threshold():
     """Test 'action_threshold' error code."""
     # Loose state, strict action
     env = PlantCalibrationModel(
-        dataset_id="plant-data/mixed-v19", max_state_dist=10.0, max_action_dist=-0.1
+        dataset_id="plant-data/mixed-v19", max_stat_dist=10.0, max_action_dist=-0.1
     )
     env.reset(seed=42)
 
@@ -126,7 +147,7 @@ def test_error_action_threshold():
 def test_threshold_termination():
     """Test that the env terminates if the best neighbor violates thresholds."""
     env = PlantCalibrationModel(
-        dataset_id="plant-data/mixed-v19", k=3, max_state_dist=0.0, max_action_dist=0.0
+        dataset_id="plant-data/mixed-v19", k=3, max_stat_dist=0.0, max_action_dist=0.0
     )
     env.reset(seed=42)
 
