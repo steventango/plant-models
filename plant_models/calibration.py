@@ -32,6 +32,49 @@ class PlantCalibrationModel(gym.Env):
         self.key = jax.random.key(0)
         self._load_dataset()
 
+        self.sigma_stat, self.sigma_emb, self.sigma_action = self._estimate_sigmas()
+
+    def _estimate_sigmas(self, n_samples: int = 1000, seed: int = 42):
+        # Sample random pairs
+        rng = np.random.RandomState(seed)
+        n_data = self.X_stat_np.shape[0]
+        # Use numpy for initial sampling to avoid JAX overhead/complexity in init
+        idx1 = rng.choice(n_data, n_samples)
+        idx2 = rng.choice(n_data, n_samples)
+
+        # 1. Stat Distance (Euclidean on Z-scored stats)
+        # Note: X_stat_norm is JAX array, convert to numpy for this one-off calc or use JAX
+        # Let's use numpy for simplicity in init
+        s1 = np.array(self.X_stat_norm)[idx1]
+        s2 = np.array(self.X_stat_norm)[idx2]
+        diff = s1 - s2
+        d_stat = np.sqrt(np.sum(diff**2, axis=1))
+        sigma_stat = np.median(d_stat)
+
+        # 2. Embedding Distance (Cosine)
+        # 1 - <u, v>
+        e1 = np.array(self.X_emb_norm)[idx1]
+        e2 = np.array(self.X_emb_norm)[idx2]
+        # X_emb_norm is already L2 normalized
+        sim = np.sum(e1 * e2, axis=1)
+        d_emb = 1.0 - sim
+        d_emb = np.maximum(d_emb, 0.0)
+        sigma_emb = np.median(d_emb)
+
+        # 3. Action Distance (Euclidean)
+        a1 = self.X_action_np[idx1]
+        a2 = self.X_action_np[idx2]
+        diff_a = a1 - a2
+        d_action = np.sqrt(np.sum(diff_a**2, axis=1))
+        sigma_action = np.median(d_action)
+
+        # Safety: avoid zero sigmas
+        sigma_stat = float(sigma_stat) if sigma_stat > 1e-6 else 1.0
+        sigma_emb = float(sigma_emb) if sigma_emb > 1e-6 else 1.0
+        sigma_action = float(sigma_action) if sigma_action > 1e-6 else 1.0
+
+        return sigma_stat, sigma_emb, sigma_action
+
     def _load_dataset(self):
         observations = []
         actions = []
@@ -175,6 +218,9 @@ class PlantCalibrationModel(gym.Env):
                 self.terminals,
                 self.truncateds,
                 subkey,
+                self.sigma_stat,
+                self.sigma_emb,
+                self.sigma_action,
             )
         )
 
@@ -266,6 +312,9 @@ class PlantCalibrationModel(gym.Env):
         terminals: jax.Array,
         truncateds: jax.Array,
         key: jax.Array,
+        sigma_stat: float,
+        sigma_emb: float,
+        sigma_action: float,
     ):
         # 1. Stat Distance (Euclidean on Z-scored stats)
         # ||x - q||^2 = ||x||^2 + ||q||^2 - 2 <x, q>
@@ -284,10 +333,17 @@ class PlantCalibrationModel(gym.Env):
         diff_action = X_action - q_action
         dist_action = jnp.sqrt(jnp.sum(diff_action**2, axis=1))
 
-        # Total "Cost" (Sum of distances)
-        # Minimize Cost <-> Maximize Score
-        total_dist = dist_stat + dist_emb + dist_action
-        scores = -total_dist
+        # Scores
+        # Apply Sigma Scaling (Equivalent to weighting)
+        # score = - (dist / sigma)
+        norm_stat = dist_stat / sigma_stat
+        norm_emb = dist_emb / sigma_emb
+        norm_action = dist_action / sigma_action
+
+        # State Score: used for initial Top-K selection
+        state_score = -(norm_stat + norm_emb)
+        # Action Score: used for final sampling probabilities
+        action_score = -norm_action
 
         # Identify Valid Thresholds
         stat_ok = dist_stat <= self.max_stat_dist
@@ -300,24 +356,38 @@ class PlantCalibrationModel(gym.Env):
 
         # --- Primary Search: Valid Neighbors (within thresholds) ---
         # Mask out seen states, terminal/truncated states, AND invalid thresholds
-        valid_scores = jnp.where(seen_mask | done | (~all_ok), -jnp.inf, scores)
+        # We filter primarily by STATE score to ensure good state transitions
+        valid_state_scores = jnp.where(
+            seen_mask | done | (~all_ok), -jnp.inf, state_score
+        )
 
-        # Top K valid
-        top_k_scores, top_k_indices = jax.lax.top_k(valid_scores, self.k)
+        # Top K candidates based on STATE score
+        top_k_state_vals, top_k_indices = jax.lax.top_k(valid_state_scores, self.k)
 
         # Did we find at least one valid neighbor?
-        found_valid = top_k_scores[0] > -1e9
+        found_valid = top_k_state_vals[0] > -1e9
 
-        # Handle NaNs in Softmax if entirely empty (all -inf)
-        # If found_valid is False, these probs don't matter, but we want to avoid NaNs
-        safe_top_k = jnp.where(jnp.isneginf(top_k_scores), -1e9, top_k_scores)
-        probs = jax.nn.softmax(safe_top_k)
-        choice_idx = jax.random.choice(key, top_k_indices, p=probs)
+        # Extract Action Scores for these candidates for sampling
+        candidate_action_scores = action_score[top_k_indices]
+
+        # Handle NaNs/Infs for Softmax
+        # If a candidate slot is invalid (value is -inf from top_k), ensure it stays -inf or very low
+        safe_candidate_scores = jnp.where(
+            top_k_state_vals > -1e9, candidate_action_scores, -1e9
+        )
+
+        probs = jax.nn.softmax(safe_candidate_scores)
+
+        # Sample from the top K candidates
+        # choice_idx returns an index into 'top_k_indices' (0 to k-1), not the global index
+        local_choice_idx = jax.random.choice(key, jnp.arange(self.k), p=probs)
+        choice_idx = top_k_indices[local_choice_idx]
 
         # --- Fallback Search: Best Invalid Neighbor ---
         # Used only if 'found_valid' is False, to determine error code.
         # Mask out seen states and terminal/truncated states (ignore thresholds)
-        fallback_scores = jnp.where(seen_mask | done, -jnp.inf, scores)
+        # For fallback, we can use total_score to find "closest" overall.
+        fallback_scores = jnp.where(seen_mask | done, -jnp.inf, action_score)
         fallback_val, fallback_indices = jax.lax.top_k(fallback_scores, 1)
         fallback_idx = fallback_indices[0]
         found_any = fallback_val[0] > -1e9
@@ -353,10 +423,6 @@ class PlantCalibrationModel(gym.Env):
         target_idx = jax.lax.select(found_valid, choice_idx, fallback_idx)
 
         # Guard against target_idx being invalid if nothing found at all
-        # (Though if nothing found, we return -1 and distances don't matter much,
-        # but we must access arrays safely. fallback_idx defaults to 0 if all -inf?
-        # top_k indices for -inf are usually 0 or indices. Let's trust top_k returns in-bound indices.)
-
         best_stat_dist = dist_stat[target_idx]
         best_emb_dist = dist_emb[target_idx]
         best_action_dist = dist_action[target_idx]

@@ -35,19 +35,18 @@ def get_policy_action(policy_name: str, rng: np.random.Generator):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v19")
-    parser.add_argument("--K", type=int, default=3, help="Number of neighbors")
+    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-all-v20")
+    parser.add_argument("--K", type=int, default=10, help="Number of neighbors")
     parser.add_argument(
         "--max_stat_dist", type=float, default=3.0, help="Max stat distance"
     )
     parser.add_argument(
         "--max_emb_dist", type=float, default=1.0, help="Max embedding distance"
     )
-    max_action_dist = np.linalg.norm(np.array([0, 1, 0] - np.ones(3) / 3))
     parser.add_argument(
         "--max_action_dist",
         type=float,
-        default=max_action_dist,
+        default=float("inf"),
         help="Max action distance",
     )
     parser.add_argument("--steps", type=int, default=13, help="Rollout steps")
@@ -79,7 +78,6 @@ def main():
         "Constant Red",
         "Constant White",
         "Constant Blue",
-        "Constant White Blue",
     ]
 
     results = []
@@ -145,6 +143,12 @@ def main():
 
     logger.info("Plotting results...")
 
+    # Calculate and print statistics
+    logger.info("Return Statistics per Policy:")
+    stats = df_returns.groupby("Policy")["Value"].describe()
+    print(stats)
+    print("\n")
+
     # Define custom color palette
     custom_palette = {
         "Uniform Dirichlet": "tab:orange",
@@ -152,7 +156,6 @@ def main():
         "Constant Red": "red",
         "Constant White": "black",
         "Constant Blue": "blue",
-        "Constant White Blue": "lightblue",
     }
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 12))

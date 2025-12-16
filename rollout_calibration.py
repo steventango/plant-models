@@ -23,17 +23,19 @@ class ConstantAgent:
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v19")
-    parser.add_argument("--K", type=int, default=3, help="Number of neighbors")
+    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-all-v20")
+    parser.add_argument("--K", type=int, default=10, help="Number of neighbors")
     parser.add_argument(
         "--max_stat_dist", type=float, default=3.0, help="Max stat distance"
     )
     parser.add_argument(
         "--max_emb_dist", type=float, default=1.0, help="Max embedding distance"
     )
-    max_action_dist = np.linalg.norm(np.array([0, 1, 0] - np.ones(3) / 3))
     parser.add_argument(
-        "--max_action_dist", type=float, default=max_action_dist, help="Max action distance"
+        "--max_action_dist",
+        type=float,
+        default=float("inf"),
+        help="Max action distance",
     )
     parser.add_argument("--steps", type=int, default=13, help="Rollout steps")
     parser.add_argument(
@@ -63,7 +65,7 @@ def main():
     # Pick random start states from the dataset
     logger.info("Starting rollouts...")
 
-    plt.figure(figsize=(10, 6))
+    fig, ax = plt.subplots(2, 1, figsize=(10, 12))
 
     all_trajectories = []
 
@@ -71,7 +73,9 @@ def main():
         obs, info = env.reset(seed=i + args.seed)
 
         clean_area_idx = 1
+        wall_time_idx = 0
         areas = [info["area"]]
+        wall_times = [obs[wall_time_idx]]
         rewards = []
         traj_data = [
             {
@@ -89,7 +93,7 @@ def main():
             }
 
             obs = next_obs
-            
+
             if terminated:
                 logger.info(f"Rollout {i} terminated at step {t}")
                 if "error" in info:
@@ -97,21 +101,29 @@ def main():
                 else:
                     traj_data.append(step_data)
                     areas.append(info["area"])
+                    wall_times.append(obs[wall_time_idx])
                     rewards.append(reward)
                 break
             else:
                 traj_data.append(step_data)
                 areas.append(info["area"])
+                wall_times.append(obs[wall_time_idx])
                 rewards.append(reward)
 
         all_trajectories.append(traj_data)
-        plt.plot(areas, label=f"Rollout {i}")
+        ax[0].plot(areas, label=f"Rollout {i}")
+        ax[1].plot(wall_times, label=f"Rollout {i}")
 
-    plt.title("Calibration Model Rollouts (Area)")
-    plt.xlabel("Step")
-    plt.ylabel("Area")
-    plt.legend()
-    plt.grid(True)
+    ax[0].set_title("Calibration Model Rollouts (Area)")
+    ax[0].set_ylabel("Area")
+    ax[0].grid(True)
+
+    ax[1].set_title("Calibration Model Rollouts (Wall Time)")
+    ax[1].set_xlabel("Step")
+    ax[1].set_ylabel("Wall Time")
+    ax[1].grid(True)
+
+    plt.tight_layout()
     plt.savefig(args.output_plot)
     logger.info(f"Saved rollout plot to {args.output_plot}")
 
