@@ -113,7 +113,7 @@ def test_error_stat_threshold():
 
 def test_error_emb_threshold():
     """Test 'emb_threshold' error code."""
-    # Strict state, loose action
+    # Loose stat, strict embedding, loose action
     env = PlantCalibrationModel(
         dataset_id="plant-data/mixed-v19",
         max_stat_dist=10.0,
