@@ -95,6 +95,8 @@ class PlantCalibrationModel(gym.Env):
         self.X_stat = jnp.array(self.X_stat_np)
         self.X_emb = jnp.array(self.X_emb_np)
         self.X_action = jnp.array(self.X_action_np)
+        self.terminals = jnp.array(self.terminals_np)
+        self.truncateds = jnp.array(self.truncateds_np)
 
         # Empirical stats for Plant Stats (Euclidean)
         self.norm_mean = np.mean(self.X_stat_np, axis=0)
@@ -170,6 +172,8 @@ class PlantCalibrationModel(gym.Env):
                 self.X_stat_norm,
                 self.X_emb_norm,
                 self.X_action_jax,
+                self.terminals,
+                self.truncateds,
                 subkey,
             )
         )
@@ -259,6 +263,8 @@ class PlantCalibrationModel(gym.Env):
         X_stat_norm: jax.Array,
         X_emb_norm: jax.Array,
         X_action: jax.Array,
+        terminals: jax.Array,
+        truncateds: jax.Array,
         key: jax.Array,
     ):
         # 1. Stat Distance (Euclidean on Z-scored stats)
@@ -289,9 +295,12 @@ class PlantCalibrationModel(gym.Env):
         action_ok = dist_action <= self.max_action_dist
         all_ok = stat_ok & emb_ok & action_ok
 
+        # Mask out terminal and truncated states
+        done = terminals | truncateds
+
         # --- Primary Search: Valid Neighbors (within thresholds) ---
-        # Mask out seen states AND invalid thresholds
-        valid_scores = jnp.where(seen_mask | (~all_ok), -jnp.inf, scores)
+        # Mask out seen states, terminal/truncated states, AND invalid thresholds
+        valid_scores = jnp.where(seen_mask | done | (~all_ok), -jnp.inf, scores)
 
         # Top K valid
         top_k_scores, top_k_indices = jax.lax.top_k(valid_scores, self.k)
@@ -307,8 +316,8 @@ class PlantCalibrationModel(gym.Env):
 
         # --- Fallback Search: Best Invalid Neighbor ---
         # Used only if 'found_valid' is False, to determine error code.
-        # Mask out ONLY seen states (ignore thresholds)
-        fallback_scores = jnp.where(seen_mask, -jnp.inf, scores)
+        # Mask out seen states and terminal/truncated states (ignore thresholds)
+        fallback_scores = jnp.where(seen_mask | done, -jnp.inf, scores)
         fallback_val, fallback_indices = jax.lax.top_k(fallback_scores, 1)
         fallback_idx = fallback_indices[0]
         found_any = fallback_val[0] > -1e9
