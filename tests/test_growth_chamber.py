@@ -5,6 +5,7 @@ from plant_models.calibration import PlantGrowthChamberModel
 
 N_PLANTS = 64
 
+
 @pytest.fixture
 def growth_chamber():
     """Fixture to initialize the PlantGrowthChamberModel."""
@@ -63,7 +64,9 @@ def test_observation_modes():
 
     # With seed 42 and N=4, they should be different
     diff = np.abs(obs_median - obs_mean).sum()
-    assert diff > 0, f"Mean and median observations should be different for N={N_PLANTS}"
+    assert diff > 0, (
+        f"Mean and median observations should be different for N={N_PLANTS}"
+    )
 
 
 def test_grid_rendering(growth_chamber):
