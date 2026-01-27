@@ -157,6 +157,8 @@ class PlantCalibrationModel(gym.Env):
         max_action_dist: float = 0.1,
         terminal_episode_steps: int | None = 13,
         render_mode: str | None = None,
+        stat_weights: jax.Array | None = None,
+        emb_weight: float = 1.0,
         _shared_data: dict | None = None,  # Deprecated
     ):
         self.render_mode = render_mode
@@ -177,6 +179,12 @@ class PlantCalibrationModel(gym.Env):
         self.observation_space = self.data.observation_space
         self.action_space = self.data.action_space
         self.key = jax.random.key(0)
+        self.stat_weights = (
+            stat_weights
+            if stat_weights is not None
+            else jnp.ones((self.data.X_stat.shape[1],))
+        )
+        self.emb_weight = emb_weight
 
     def reset(self, seed: int | None = None, options=None):
         super().reset(seed=seed)
@@ -243,6 +251,8 @@ class PlantCalibrationModel(gym.Env):
                 self.data.sigma_stat,
                 self.data.sigma_emb,
                 self.data.sigma_action,
+                self.stat_weights,
+                self.emb_weight,
             )
         )
 
@@ -341,11 +351,11 @@ class PlantCalibrationModel(gym.Env):
         sigma_stat: float,
         sigma_emb: float,
         sigma_action: float,
+        stat_weights: jax.Array,
+        emb_weight: float,
     ):
-        # 1. Stat Distance (Euclidean on Z-scored stats)
-        # ||x - q||^2 = ||x||^2 + ||q||^2 - 2 <x, q>
         # but simpler to just compute diff since dimension is small
-        diff_stat = X_stat_norm - q_stat
+        diff_stat = (X_stat_norm - q_stat) * stat_weights
         dist_stat = jnp.sqrt(jnp.sum(diff_stat**2, axis=1))
 
         # 2. Embedding Distance (Cosine)
@@ -367,7 +377,7 @@ class PlantCalibrationModel(gym.Env):
         norm_action = dist_action / sigma_action
 
         # State Score: used for initial Top-K selection
-        state_score = -(norm_stat + norm_emb)
+        state_score = -(norm_stat + norm_emb * emb_weight)
         # Action Score: used for final sampling probabilities
         action_score = -norm_action
 

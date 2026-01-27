@@ -35,18 +35,18 @@ def get_policy_action(policy_name: str, rng: np.random.Generator):
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-all-v20")
+    parser.add_argument("--dataset_id", type=str, default="plant-data/mixed-v23")
     parser.add_argument("--K", type=int, default=10, help="Number of neighbors")
     parser.add_argument(
-        "--max_stat_dist", type=float, default=3.0, help="Max stat distance"
+        "--max_stat_dist", type=float, default=9.0, help="Max stat distance"
     )
     parser.add_argument(
-        "--max_emb_dist", type=float, default=1.0, help="Max embedding distance"
+        "--max_emb_dist", type=float, default=10.0, help="Max embedding distance"
     )
     parser.add_argument(
         "--max_action_dist",
         type=float,
-        default=float("inf"),
+        default=0.816496580927726,
         help="Max action distance",
     )
     parser.add_argument("--steps", type=int, default=13, help="Rollout steps")
@@ -62,6 +62,12 @@ def main():
     # Ensure output directory exists
     Path(args.output_plot).parent.mkdir(parents=True, exist_ok=True)
 
+    # Define Best Feature Weights (PCA_4: 38-41, LogArea: 28, Solidity: 3, LitersPerPot: 33)
+    best_indices = [3, 28, 33, 38, 39, 40, 41]
+    stat_weights = np.zeros(48)
+    for idx in best_indices:
+        stat_weights[idx] = 1.0
+
     # Initialize Model
     logger.info("Initializing PlantCalibrationModel...")
     env = PlantCalibrationModel(
@@ -70,6 +76,8 @@ def main():
         max_stat_dist=args.max_stat_dist,
         max_emb_dist=args.max_emb_dist,
         max_action_dist=args.max_action_dist,
+        stat_weights=stat_weights,
+        emb_weight=0.0,
     )
 
     policies = [
