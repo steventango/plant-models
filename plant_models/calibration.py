@@ -9,65 +9,46 @@ import numpy as np
 from PIL import Image
 
 
-class PlantCalibrationModel(gym.Env):
-    metadata = {"render_modes": ["rgb_array"]}
+class PlantDataset:
+    _cache = {}
 
-    def __init__(
-        self,
-        dataset_id: str = "plant-data/mixed-v19",
-        k: int = 3,
-        max_stat_dist: float = 0.1,
-        max_emb_dist: float = 0.1,
-        max_action_dist: float = 0.1,
-        terminal_episode_steps: int | None = 13,
-        render_mode: str | None = None,
-    ):
-        self.render_mode = render_mode
+    def __init__(self, dataset_id: str):
+        self.dataset_id = dataset_id
         self.dataset = minari.load_dataset(dataset_id)
-        self.k = k
-        self.max_stat_dist = max_stat_dist
-        self.max_emb_dist = max_emb_dist
-        self.max_action_dist = max_action_dist
-        self.terminal_episode_steps = terminal_episode_steps
-        self.observation_space = self.dataset.observation_space
-        self.action_space = self.dataset.action_space
-        self.key = jax.random.key(0)
         self._load_dataset()
-
         self.sigma_stat, self.sigma_emb, self.sigma_action = self._estimate_sigmas()
+
+    @classmethod
+    def get(cls, dataset_id: str):
+        if dataset_id not in cls._cache:
+            cls._cache[dataset_id] = cls(dataset_id)
+        return cls._cache[dataset_id]
 
     def _estimate_sigmas(self, n_samples: int = 1000, seed: int = 42):
         # Sample random pairs
         rng = np.random.RandomState(seed)
-        n_data = self.X_stat_np.shape[0]
-        # Use numpy for initial sampling to avoid JAX overhead/complexity in init
+        n_data = self.X_stat_norm.shape[0]
         idx1 = rng.choice(n_data, n_samples)
         idx2 = rng.choice(n_data, n_samples)
 
         # 1. Stat Distance (Euclidean on Z-scored stats)
-        # Note: X_stat_norm is JAX array, convert to numpy for this one-off calc or use JAX
-        # Let's use numpy for simplicity in init
         s1 = np.array(self.X_stat_norm)[idx1]
         s2 = np.array(self.X_stat_norm)[idx2]
-        diff = s1 - s2
-        d_stat = np.sqrt(np.sum(diff**2, axis=1))
+        d_stat = np.sqrt(np.sum((s1 - s2) ** 2, axis=1))
         sigma_stat = np.median(d_stat)
 
         # 2. Embedding Distance (Cosine)
         # 1 - <u, v>
         e1 = np.array(self.X_emb_norm)[idx1]
         e2 = np.array(self.X_emb_norm)[idx2]
-        # X_emb_norm is already L2 normalized
         sim = np.sum(e1 * e2, axis=1)
-        d_emb = 1.0 - sim
-        d_emb = np.maximum(d_emb, 0.0)
+        d_emb = np.maximum(1.0 - sim, 0.0)
         sigma_emb = np.median(d_emb)
 
         # 3. Action Distance (Euclidean)
         a1 = self.X_action_np[idx1]
         a2 = self.X_action_np[idx2]
-        diff_a = a1 - a2
-        d_action = np.sqrt(np.sum(diff_a**2, axis=1))
+        d_action = np.sqrt(np.sum((a1 - a2) ** 2, axis=1))
         sigma_action = np.median(d_action)
 
         # Safety: avoid zero sigmas
@@ -158,10 +139,52 @@ class PlantCalibrationModel(gym.Env):
         self.X_emb_norm = self.X_emb / jnp.clip(norm_emb, min=1e-8)
 
         # No normalization for Action, we use raw Euclidean distance on the simplex
-        # (Assuming actions are already somewhat normalized or on a simplex)
         self.X_action_jax = self.X_action
 
-        self.seen_mask = jnp.zeros(current_idx, dtype=bool)
+        self.observation_space = self.dataset.observation_space
+        self.action_space = self.dataset.action_space
+
+
+class PlantCalibrationModel(gym.Env):
+    metadata = {"render_modes": ["rgb_array"]}
+
+    def __init__(
+        self,
+        dataset_id: str | PlantDataset = "plant-data/mixed-v19",
+        k: int = 3,
+        max_stat_dist: float = 0.1,
+        max_emb_dist: float = 0.1,
+        max_action_dist: float = 0.1,
+        terminal_episode_steps: int | None = 13,
+        render_mode: str | None = None,
+        stat_weights: jax.Array | None = None,
+        emb_weight: float = 1.0,
+        _shared_data: dict | None = None,  # Deprecated
+    ):
+        self.render_mode = render_mode
+        self.k = k
+        self.max_stat_dist = max_stat_dist
+        self.max_emb_dist = max_emb_dist
+        self.max_action_dist = max_action_dist
+        self.terminal_episode_steps = terminal_episode_steps
+
+        if isinstance(dataset_id, PlantDataset):
+            self.data = dataset_id
+        elif _shared_data is not None:
+            # Fallback for old shared data logic if needed, but better to migrate
+            self.data = type("Data", (), _shared_data)
+        else:
+            self.data = PlantDataset.get(dataset_id)
+
+        self.observation_space = self.data.observation_space
+        self.action_space = self.data.action_space
+        self.key = jax.random.key(0)
+        self.stat_weights = (
+            stat_weights
+            if stat_weights is not None
+            else jnp.ones((self.data.X_stat.shape[1],))
+        )
+        self.emb_weight = emb_weight
 
     def reset(self, seed: int | None = None, options=None):
         super().reset(seed=seed)
@@ -172,23 +195,25 @@ class PlantCalibrationModel(gym.Env):
         self.key, subkey = jax.random.split(self.key)
 
         # Pick random initial index
-        idx = int(jax.random.randint(subkey, (1,), 0, len(self.initial_indices))[0])
-        dataset_idx = self.initial_indices[idx]
+        idx = int(
+            jax.random.randint(subkey, (1,), 0, len(self.data.initial_indices))[0]
+        )
+        dataset_idx = self.data.initial_indices[idx]
 
-        self.current_state = np.array(self.X_state_np[dataset_idx])
+        self.current_state = np.array(self.data.X_state_np[dataset_idx])
 
         # Reset seen mask
-        self.seen_mask = jnp.zeros(self.X_stat.shape[0], dtype=bool)
+        self.seen_mask = jnp.zeros(self.data.X_stat.shape[0], dtype=bool)
         self.seen_mask = self.seen_mask.at[dataset_idx].set(True)
 
         self.current_return = 0.0
         self.current_episode_steps = 0
 
-        self.current_image_path = self.image_paths[dataset_idx]
+        self.current_image_path = self.data.image_paths[dataset_idx]
 
         return self.current_state, {
-            "area": self.area[dataset_idx],
-            "image_path": self.image_paths[dataset_idx],
+            "area": self.data.area[dataset_idx],
+            "image_path": self.data.image_paths[dataset_idx],
         }
 
     def step(self, action):
@@ -196,7 +221,9 @@ class PlantCalibrationModel(gym.Env):
         q_stat = self.current_state[:-768]
         q_emb = self.current_state[-768:]
 
-        q_stat_norm = (q_stat - self.norm_mean) / np.clip(self.norm_std, min=1e-8)
+        q_stat_norm = (q_stat - self.data.norm_mean) / np.clip(
+            self.data.norm_std, min=1e-8
+        )
         q_stat_norm = jnp.array(q_stat_norm)
 
         # L2 Normalize Query Embedding
@@ -215,15 +242,17 @@ class PlantCalibrationModel(gym.Env):
                 q_emb_norm,
                 q_action,
                 self.seen_mask,
-                self.X_stat_norm,
-                self.X_emb_norm,
-                self.X_action_jax,
-                self.terminals,
-                self.truncateds,
+                self.data.X_stat_norm,
+                self.data.X_emb_norm,
+                self.data.X_action_jax,
+                self.data.terminals,
+                self.data.truncateds,
                 subkey,
-                self.sigma_stat,
-                self.sigma_emb,
-                self.sigma_action,
+                self.data.sigma_stat,
+                self.data.sigma_emb,
+                self.data.sigma_action,
+                self.stat_weights,
+                self.emb_weight,
             )
         )
 
@@ -237,10 +266,8 @@ class PlantCalibrationModel(gym.Env):
             }
             error_msg = error_codes.get(int(idx), "unknown_error")
 
-            reward = self.default_return - self.current_return
+            reward = self.data.default_return - self.current_return
             self.current_return += reward
-
-            self.current_image_path = self.image_paths[idx]
 
             return (
                 self.current_state,
@@ -257,10 +284,10 @@ class PlantCalibrationModel(gym.Env):
         idx = int(idx)
 
         # Retrieve Transitions
-        next_state = self.X_next_state_np[idx]
-        reward = self.rewards_np[idx]
-        terminated = self.terminals_np[idx]
-        truncated = self.truncateds_np[idx]
+        next_state = self.data.X_next_state_np[idx]
+        reward = self.data.rewards_np[idx]
+        terminated = self.data.terminals_np[idx]
+        truncated = self.data.truncateds_np[idx]
 
         self.current_state = np.array(next_state)
         reward = float(reward)
@@ -277,7 +304,7 @@ class PlantCalibrationModel(gym.Env):
         ):
             terminated = True
 
-        self.current_image_path = self.image_paths[idx]
+        self.current_image_path = self.data.image_paths[idx]
 
         return (
             self.current_state,
@@ -285,8 +312,8 @@ class PlantCalibrationModel(gym.Env):
             terminated,
             truncated,
             {
-                "area": self.area[idx],
-                "image_path": self.image_paths[idx],
+                "area": self.data.area[idx],
+                "image_path": self.data.image_paths[idx],
             },
         )
 
@@ -324,11 +351,11 @@ class PlantCalibrationModel(gym.Env):
         sigma_stat: float,
         sigma_emb: float,
         sigma_action: float,
+        stat_weights: jax.Array,
+        emb_weight: float,
     ):
-        # 1. Stat Distance (Euclidean on Z-scored stats)
-        # ||x - q||^2 = ||x||^2 + ||q||^2 - 2 <x, q>
         # but simpler to just compute diff since dimension is small
-        diff_stat = X_stat_norm - q_stat
+        diff_stat = (X_stat_norm - q_stat) * stat_weights
         dist_stat = jnp.sqrt(jnp.sum(diff_stat**2, axis=1))
 
         # 2. Embedding Distance (Cosine)
@@ -350,7 +377,7 @@ class PlantCalibrationModel(gym.Env):
         norm_action = dist_action / sigma_action
 
         # State Score: used for initial Top-K selection
-        state_score = -(norm_stat + norm_emb)
+        state_score = -(norm_stat + norm_emb * emb_weight)
         # Action Score: used for final sampling probabilities
         action_score = -norm_action
 
@@ -437,3 +464,144 @@ class PlantCalibrationModel(gym.Env):
         best_action_dist = dist_action[target_idx]
 
         return final_idx, new_mask, best_stat_dist, best_emb_dist, best_action_dist
+
+
+class PlantGrowthChamberModel(gym.Env):
+    metadata = {"render_modes": ["rgb_array"]}
+
+    def __init__(
+        self,
+        n_plants=64,
+        obs_mode="mean",
+        dataset_id="plant-data/mixed-v19",
+        terminal_episode_steps: int | None = 13,
+        **kwargs,
+    ):
+        self.n_plants = n_plants
+        self.obs_mode = obs_mode
+        self.terminal_episode_steps = terminal_episode_steps
+
+        self.data = PlantDataset.get(dataset_id)
+
+        self.plants = []
+        for i in range(n_plants):
+            self.plants.append(PlantCalibrationModel(dataset_id=self.data, **kwargs))
+
+        self.observation_space = self.data.observation_space
+        self.action_space = self.data.action_space
+
+        self.terminated_mask = np.zeros(n_plants, dtype=bool)
+        self.last_obs_list = [None] * n_plants
+        self.current_episode_steps = 0
+
+    def reset(self, seed: int | None = None, options=None):
+        super().reset(seed=seed)
+        obs_list = []
+        info_list = []
+
+        self.terminated_mask = np.zeros(self.n_plants, dtype=bool)
+        self.current_episode_steps = 0
+
+        for i, plant in enumerate(self.plants):
+            p_seed = None if seed is None else seed + i
+            obs, info = plant.reset(seed=p_seed, options=options)
+            obs_list.append(obs)
+            info_list.append(info)
+            self.last_obs_list[i] = obs
+
+        return self._aggregate_obs(obs_list), {"infos": info_list}
+
+    def _aggregate_obs(self, obs_list, mask=None):
+        obs_array = np.stack(obs_list)
+        if mask is not None:
+            # Only consider plants that are NOT terminated
+            active_indices = np.where(~mask)[0]
+            if len(active_indices) > 0:
+                obs_array = obs_array[active_indices]
+            else:
+                # If all plants are terminated, use the last known observations from all plants
+                # (obs_list already contains last_obs for terminated plants in step())
+                pass
+
+        if self.obs_mode == "mean":
+            return np.mean(obs_array, axis=0)
+        elif self.obs_mode == "median":
+            # Select the observation vector of the plant with the median area among active plants
+            areas = obs_array[:, 1]
+            median_area = np.median(areas)
+            idx = np.argmin(np.abs(areas - median_area))
+            return obs_array[idx]
+        return obs_array[0]
+
+    def step(self, action):
+        obs_list = []
+        rewards = []
+        terminateds = []
+        truncateds = []
+        infos = []
+
+        self.current_episode_steps += 1
+
+        for i, plant in enumerate(self.plants):
+            if not self.terminated_mask[i]:
+                obs, reward, terminated, truncated, info = plant.step(action)
+                self.last_obs_list[i] = obs
+                self.terminated_mask[i] = terminated
+
+                obs_list.append(obs)
+                rewards.append(reward)
+                terminateds.append(terminated)
+                truncateds.append(truncated)
+                infos.append(info)
+            else:
+                # Plant already terminated, use last obs and 0 reward
+                obs_list.append(self.last_obs_list[i])
+                rewards.append(0.0)
+                terminateds.append(True)
+                truncateds.append(False)
+                infos.append({"error": "already_terminated"})
+
+        agg_obs = self._aggregate_obs(obs_list, mask=self.terminated_mask)
+        mean_reward = np.mean(rewards)
+
+        # Chamber terminates if all plants are done OR step limit reached
+        all_plants_terminated = all(self.terminated_mask)
+        limit_reached = (
+            self.terminal_episode_steps is not None
+            and self.current_episode_steps >= self.terminal_episode_steps
+        )
+
+        is_terminated = all_plants_terminated
+        is_truncated = limit_reached and not all_plants_terminated
+
+        return agg_obs, mean_reward, is_terminated, is_truncated, {"infos": infos}
+
+    def render(self):
+        if (
+            self.metadata.get("render_modes")
+            and "rgb_array" in self.metadata["render_modes"]
+        ):
+            imgs = []
+            for plant in self.plants:
+                img = plant.render()
+                if img is not None:
+                    imgs.append(img)
+
+            if not imgs:
+                return None
+
+            # Grid rendering
+            n = len(imgs)
+            cols = int(math.ceil(math.sqrt(n)))
+            rows = int(math.ceil(n / cols))
+
+            h, w, c = imgs[0].shape
+            grid = np.zeros((rows * h, cols * w, c), dtype=np.uint8)
+
+            for idx, img in enumerate(imgs):
+                r = idx // cols
+                c = idx % cols
+                grid[r * h : (r + 1) * h, c * w : (c + 1) * w, :] = img
+
+            return grid
+        return None
